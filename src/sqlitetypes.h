@@ -8,6 +8,7 @@
 #include <QSharedPointer>
 #include <QVector>
 #include <QStringList>
+#include <QPair>
 
 namespace sqlb {
 
@@ -19,7 +20,8 @@ public:
           bool notnull = false,
           const QString& defaultvalue = "",
           const QString& check = "",
-          bool pk = false)
+          bool pk = false,
+          bool unique = false)
         : m_name(name)
         , m_type(type)
         , m_notnull(notnull)
@@ -27,6 +29,7 @@ public:
         , m_defaultvalue(defaultvalue)
         , m_autoincrement(false)
         , m_primaryKey(pk)
+        , m_unique(unique)
     {}
 
     QString toString(const QString& indent = "\t", const QString& sep = "\t") const;
@@ -38,6 +41,8 @@ public:
     void setDefaultValue(const QString& defaultvalue) { m_defaultvalue = defaultvalue; }
     void setAutoIncrement(bool autoinc) { m_autoincrement = autoinc; }
     void setPrimaryKey(bool pk) { m_primaryKey = pk; }
+    void setUnique(bool u) { m_unique = u; }
+    void setForeignKey(const QString& key) { m_foreignKey = key; }
 
     bool isText() const;
     bool isInteger() const;
@@ -49,6 +54,8 @@ public:
     const QString& defaultValue() const { return m_defaultvalue; }
     bool autoIncrement() const { return m_autoincrement; }
     bool primaryKey() const { return m_primaryKey; }
+    bool unique() const { return m_unique; }
+    const QString& foreignKey() const { return m_foreignKey; }
 
     static QStringList Datatypes;
 private:
@@ -57,8 +64,10 @@ private:
     bool m_notnull;
     QString m_check;
     QString m_defaultvalue;
+    QString m_foreignKey;   // Even though this information is a table constraint easier for accessing and processing to store it here
     bool m_autoincrement; //! this is stored here for simplification
     bool m_primaryKey;
+    bool m_unique;
 };
 
 typedef QSharedPointer<Field> FieldPtr;
@@ -66,19 +75,13 @@ typedef QVector< FieldPtr > FieldVector;
 class Table
 {
 public:
-    Table(const QString& name): m_name(name), m_rowidColumn("rowid") {}
+    Table(const QString& name): m_name(name), m_rowidColumn("_rowid_") {}
     virtual ~Table();
 
     void setName(const QString& name) { m_name = name; }
 
     const QString& name() const { return m_name; }
     const FieldVector& fields() const { return m_fields; }
-
-    /**
-     * @brief Creates an empty insert statement.
-     * @return An sqlite conform INSERT INTO statement with empty values. (NULL,'',0)
-     */
-    QString emptyInsertStmt() const;
 
     /**
      * @brief Returns the CREATE TABLE statement for this table object
@@ -90,8 +93,10 @@ public:
     bool removeField(const QString& sFieldName);
     void setFields(const FieldVector& fields);
     void setField(int index, FieldPtr f) { m_fields[index] = f; }
+    QStringList fieldNames() const;
     void setRowidColumn(const QString& rowid) {  m_rowidColumn = rowid; }
-    QString rowidColumn() const { return m_rowidColumn; }
+    const QString& rowidColumn() const { return m_rowidColumn; }
+    bool isWithoutRowidTable() const { return m_rowidColumn != "_rowid_"; }
     void clear();
 
     /**
@@ -104,7 +109,14 @@ public:
 
     int findPk() const;
 
-    static Table parseSQL(const QString& sSQL);
+    /**
+     * @brief parseSQL Parses the create Table statement in sSQL.
+     * @param sSQL The create table statement.
+     * @return A pair first is a table object, second is a bool indicating
+     *         if our modify dialog supports the table.
+     *         The table object may be a empty table if parsing failed.
+     */
+    static QPair<Table, bool> parseSQL(const QString& sSQL);
 private:
     QStringList fieldList() const;
     bool hasAutoIncrement() const;
@@ -123,15 +135,20 @@ private:
 class CreateTableWalker
 {
 public:
-    CreateTableWalker(antlr::RefAST r) : m_root(r) {}
+    CreateTableWalker(antlr::RefAST r)
+        : m_root(r)
+        , m_bModifySupported(true)
+    {}
 
     Table table();
+    bool modifysupported() const { return m_bModifySupported; }
 
 private:
     void parsecolumn(FieldPtr& f, antlr::RefAST c);
 
 private:
     antlr::RefAST m_root;
+    bool m_bModifySupported;
 };
 
 } //namespace sqlb

@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>SQLiteBrowser</string>
+   <string>DB Browser for SQLite</string>
   </property>
   <property name="windowIcon">
    <iconset resource="icons/icons.qrc">
@@ -278,8 +278,8 @@
             <rect>
              <x>0</x>
              <y>0</y>
-             <width>637</width>
-             <height>501</height>
+             <width>294</width>
+             <height>444</height>
             </rect>
            </property>
            <layout class="QFormLayout" name="formLayout">
@@ -764,7 +764,7 @@
      <x>0</x>
      <y>0</y>
      <width>1000</width>
-     <height>20</height>
+     <height>19</height>
     </rect>
    </property>
    <widget class="QMenu" name="fileMenu">
@@ -787,11 +787,13 @@
     </widget>
     <addaction name="fileNewAction"/>
     <addaction name="fileOpenAction"/>
+    <addaction name="fileAttachAction"/>
     <addaction name="fileCloseAction"/>
     <addaction name="separator"/>
     <addaction name="fileSaveAction"/>
     <addaction name="fileRevertAction"/>
     <addaction name="fileCompactAction"/>
+    <addaction name="actionEncryption"/>
     <addaction name="actionLoadExtension"/>
     <addaction name="separator"/>
     <addaction name="menuImport"/>
@@ -838,7 +840,7 @@
   <widget class="QStatusBar" name="statusbar"/>
   <widget class="QToolBar" name="toolbarDB">
    <property name="windowTitle">
-    <string>toolBar</string>
+    <string>DB Toolbar</string>
    </property>
    <property name="toolButtonStyle">
     <enum>Qt::ToolButtonTextBesideIcon</enum>
@@ -920,7 +922,7 @@
        <property name="currentIndex">
         <number>0</number>
        </property>
-       <widget class="QTextEdit" name="editLogUser">
+       <widget class="SqlTextEdit" name="editLogUser">
         <property name="font">
          <font>
           <family>Monospace</family>
@@ -931,7 +933,7 @@
          <bool>true</bool>
         </property>
        </widget>
-       <widget class="QTextEdit" name="editLogApplication">
+       <widget class="SqlTextEdit" name="editLogApplication">
         <property name="font">
          <font>
           <family>Monospace</family>
@@ -1014,7 +1016,16 @@
         <item>
          <widget class="QWidget" name="widget" native="true">
           <layout class="QHBoxLayout" name="horizontalLayout_4">
-           <property name="margin">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
             <number>0</number>
            </property>
            <item>
@@ -1033,7 +1044,7 @@
            <item>
             <widget class="QPushButton" name="butSavePlot">
              <property name="toolTip">
-              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Save current plot...&lt;/p&gt;&lt;p&gt;File format choosen by extension (png, jpg, pdf, bmp)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Save current plot...&lt;/p&gt;&lt;p&gt;File format chosen by extension (png, jpg, pdf, bmp)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
              </property>
              <property name="statusTip">
               <string>Save current plot...</string>
@@ -1063,6 +1074,31 @@
          </widget>
         </item>
        </layout>
+      </widget>
+     </item>
+    </layout>
+   </widget>
+  </widget>
+  <widget class="QDockWidget" name="dockSchema">
+   <property name="windowTitle">
+    <string>DB Schema</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>2</number>
+   </attribute>
+   <widget class="QWidget" name="dockWidgetContents_3">
+    <layout class="QVBoxLayout" name="verticalLayout_9">
+     <item>
+      <widget class="QTreeView" name="treeSchemaDock">
+       <property name="alternatingRowColors">
+        <bool>true</bool>
+       </property>
+       <property name="verticalScrollMode">
+        <enum>QAbstractItemView::ScrollPerPixel</enum>
+       </property>
+       <property name="animated">
+        <bool>true</bool>
+       </property>
       </widget>
      </item>
     </layout>
@@ -1256,7 +1292,7 @@
     <string>Delete Table...</string>
    </property>
    <property name="toolTip">
-    <string>Delete Object</string>
+    <string>Delete Table</string>
    </property>
    <property name="whatsThis">
     <string>Open the Delete Table wizard, where you can select a database table to be dropped.</string>
@@ -1360,8 +1396,11 @@
    <property name="text">
     <string>&amp;Execute SQL</string>
    </property>
+   <property name="toolTip">
+    <string>Execute SQL [F5, Ctrl+Return]</string>
+   </property>
    <property name="shortcut">
-    <string>F5, Ctrl+Return</string>
+    <string>F5</string>
    </property>
   </action>
   <action name="actionSqlOpenFile">
@@ -1401,6 +1440,9 @@
    </property>
    <property name="text">
     <string>Execute current line</string>
+   </property>
+   <property name="toolTip">
+    <string>Execute current line [Ctrl+E]</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+E</string>
@@ -1474,12 +1516,34 @@
     <string>Load a working session from a file</string>
    </property>
   </action>
+  <action name="fileAttachAction">
+   <property name="enabled">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>&amp;Attach Database</string>
+   </property>
+  </action>
+  <action name="actionEncryption">
+   <property name="icon">
+    <iconset resource="icons/icons.qrc">
+     <normaloff>:/icons/encryption</normaloff>:/icons/encryption</iconset>
+   </property>
+   <property name="text">
+    <string>Set Encryption</string>
+   </property>
+  </action>
  </widget>
  <customwidgets>
   <customwidget>
    <class>ExtendedTableWidget</class>
    <extends>QTableWidget</extends>
    <header>ExtendedTableWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>SqlTextEdit</class>
+   <extends>QTextEdit</extends>
+   <header>sqltextedit.h</header>
   </customwidget>
   <customwidget>
    <class>QCustomPlot</class>
@@ -2244,6 +2308,38 @@
     </hint>
    </hints>
   </connection>
+  <connection>
+   <sender>fileAttachAction</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>fileAttach()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>499</x>
+     <y>314</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>actionEncryption</sender>
+   <signal>triggered()</signal>
+   <receiver>MainWindow</receiver>
+   <slot>editEncryption()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>-1</x>
+     <y>-1</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>499</x>
+     <y>314</y>
+    </hint>
+   </hints>
+  </connection>
  </connections>
  <slots>
   <slot>fileOpen()</slot>
@@ -2292,5 +2388,7 @@
   <slot>loadExtension()</slot>
   <slot>loadProject()</slot>
   <slot>saveProject()</slot>
+  <slot>fileAttach()</slot>
+  <slot>editEncryption()</slot>
  </slots>
 </ui>

@@ -1,20 +1,27 @@
 #include "sqlitetablemodel.h"
 #include "sqlitedb.h"
+#include "sqlite.h"
 
 #include <QDebug>
 #include <QMessageBox>
 #include <QApplication>
-#include <sqlite3.h>
 
 SqliteTableModel::SqliteTableModel(QObject* parent, DBBrowserDB* db, size_t chunkSize)
     : QAbstractTableModel(parent)
     , m_db(db)
     , m_rowCount(0)
-    , m_iSortColumn(0)
-    , m_sSortOrder("ASC")
     , m_chunkSize(chunkSize)
     , m_valid(false)
 {
+    reset();
+}
+
+void SqliteTableModel::reset()
+{
+    m_iSortColumn = 0;
+    m_sSortOrder = "ASC";
+    m_headers.clear();
+    m_mWhere.clear();
 }
 
 void SqliteTableModel::setChunkSize(size_t chunksize)
@@ -24,16 +31,30 @@ void SqliteTableModel::setChunkSize(size_t chunksize)
 
 void SqliteTableModel::setTable(const QString& table)
 {
+    reset();
+
     m_sTable = table;
 
-    m_headers.clear();
-    QString rowid = "rowid";
+    QString sColumnQuery = QString::fromUtf8("SELECT * FROM `%1`;").arg(table);
     if(m_db->getObjectByName(table).gettype() == "table")
-        rowid = sqlb::Table::parseSQL(m_db->getObjectByName(table).getsql()).rowidColumn();
-    m_headers.push_back(rowid);
-    m_headers.append(m_db->getTableFields(table));
-
-    m_mWhere.clear();
+    {
+        sqlb::Table t = sqlb::Table::parseSQL(m_db->getObjectByName(table).getsql()).first;
+        if(t.name() != "") // parsing was OK
+        {
+            m_headers.push_back(t.rowidColumn());
+            m_headers.append(m_db->getObjectByName(table).table.fieldNames());
+        }
+        else
+        {
+            m_headers.push_back("rowid");
+            m_headers.append(getColumns(sColumnQuery));
+        }
+    }
+    else
+    {
+        m_headers.push_back("rowid");
+        m_headers.append(getColumns(sColumnQuery));
+    }
 
     buildQuery();
 }
@@ -83,9 +104,8 @@ QString removeComments(QString s)
 void SqliteTableModel::setQuery(const QString& sQuery, bool dontClearHeaders)
 {
     // clear
-    m_mWhere.clear();
     if(!dontClearHeaders)
-        m_headers.clear();
+        reset();
 
     if(!m_db->isOpen())
         return;
@@ -103,17 +123,7 @@ void SqliteTableModel::setQuery(const QString& sQuery, bool dontClearHeaders)
     // headers
     if(!dontClearHeaders)
     {
-        sqlite3_stmt* stmt;
-        QByteArray utf8Query = sQuery.toUtf8();
-        int status = sqlite3_prepare_v2(m_db->_db, utf8Query, utf8Query.size(), &stmt, NULL);
-        if(SQLITE_OK == status)
-        {
-            status = sqlite3_step(stmt);
-            int columns = sqlite3_data_count(stmt);
-            for(int i = 0; i < columns; ++i)
-                m_headers.append(QString::fromUtf8((const char*)sqlite3_column_name(stmt, i)));
-        }
-        sqlite3_finalize(stmt);
+        m_headers.append(getColumns(sQuery));
     }
 
     // now fetch the first entries
@@ -297,13 +307,28 @@ bool SqliteTableModel::insertRows(int row, int count, const QModelIndex& parent)
     for(int i=0; i < m_headers.size(); ++i)
         blank_data.push_back("");
 
-    for(int i=0; i < count; ++i)
+    for(int i=row; i < row + count; ++i)
     {
-        m_data.insert(row, blank_data);
-        m_data[row].replace(0, QByteArray::number(m_db->addRecord(m_sTable)));
-    }
+        int rowid = m_db->addRecord(m_sTable);
+        if(rowid < 0)
+        {
+            endInsertRows();
+            return false;
+        }
+        m_rowCount++;
+        m_data.insert(i, blank_data);
+        m_data[i].replace(0, QByteArray::number(rowid));
 
-    m_rowCount += count;
+        // update column with default values
+        QByteArrayList rowdata;
+        if( m_db->getRow(m_sTable, rowid, rowdata) )
+        {
+            for(int j=1; j < m_headers.size(); ++j)
+            {
+                m_data[i].replace(j, rowdata[j - 1]);
+            }
+        }
+    }
 
     endInsertRows();
     return true;
@@ -338,7 +363,7 @@ void SqliteTableModel::fetchData(unsigned int from, unsigned to)
         QString queryTemp = rtrimChar(m_sQuery, ';');
 
         // If the query ends with a LIMIT statement take it as it is, if not append our own LIMIT part for lazy population
-        if(queryTemp.contains(QRegExp("LIMIT\\s+\\d+\\s*(,\\s*\\d+\\s*)?$", Qt::CaseInsensitive)))
+        if(queryTemp.contains(QRegExp("LIMIT\\s+.+\\s*((,|\\b(OFFSET)\\b)\\s*.+\\s*)?$", Qt::CaseInsensitive)))
             sLimitQuery = queryTemp;
         else
             sLimitQuery = QString("%1 LIMIT %2, %3;").arg(queryTemp).arg(from).arg(to-from);
@@ -378,6 +403,24 @@ void SqliteTableModel::buildQuery()
 
     QString sql = QString("SELECT `%1`,* FROM `%2` %3 ORDER BY `%4` %5").arg(m_headers.at(0)).arg(m_sTable).arg(where).arg(m_headers.at(m_iSortColumn)).arg(m_sSortOrder);
     setQuery(sql, true);
+}
+
+QStringList SqliteTableModel::getColumns(const QString sQuery)
+{
+    sqlite3_stmt* stmt;
+    QByteArray utf8Query = sQuery.toUtf8();
+    int status = sqlite3_prepare_v2(m_db->_db, utf8Query, utf8Query.size(), &stmt, NULL);
+    QStringList listColumns;
+    if(SQLITE_OK == status)
+    {
+        status = sqlite3_step(stmt);
+        int columns = sqlite3_data_count(stmt);
+        for(int i = 0; i < columns; ++i)
+            listColumns.append(QString::fromUtf8((const char*)sqlite3_column_name(stmt, i)));
+    }
+    sqlite3_finalize(stmt);
+
+    return listColumns;
 }
 
 void SqliteTableModel::updateFilter(int column, const QString& value)

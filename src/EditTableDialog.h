@@ -1,5 +1,5 @@
-#ifndef __EDITTABLEDIALOG_H__
-#define __EDITTABLEDIALOG_H__
+#ifndef EDITTABLEDIALOG_H
+#define EDITTABLEDIALOG_H
 
 #include "sqlitetypes.h"
 
@@ -21,6 +21,9 @@ public:
     explicit EditTableDialog(DBBrowserDB* pdb, const QString& tableName, QWidget* parent = 0);
     ~EditTableDialog();
 
+protected:
+    void keyPressEvent(QKeyEvent *evt);
+
 private:
     enum Columns {
         kName = 0,
@@ -28,8 +31,10 @@ private:
         kNotNull = 2,
         kPrimaryKey = 3,
         kAutoIncrement = 4,
-        kDefault = 5,
-        kCheck = 6
+        kUnique = 5,
+        kDefault = 6,
+        kCheck = 7,
+        kForeignKey = 8
     };
 
     void updateColumnWidth();
@@ -49,6 +54,7 @@ private slots:
     virtual void updateTypes();
     virtual void moveUp();
     virtual void moveDown();
+    virtual void setWithoutRowid(bool without_rowid);
 
 private:
     Ui::EditTableDialog* ui;

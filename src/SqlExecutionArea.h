@@ -1,11 +1,10 @@
-#ifndef __SQLEXECUTIONAREA_H__
-#define __SQLEXECUTIONAREA_H__
+#ifndef SQLEXECUTIONAREA_H
+#define SQLEXECUTIONAREA_H
 
 #include "sqltextedit.h"
 
 #include <QWidget>
 
-class SQLiteSyntaxHighlighter;
 class SqliteTableModel;
 class DBBrowserDB;
 class QMenu;
@@ -26,6 +25,7 @@ public:
     QString getSelectedSql() const;
 
     SqliteTableModel* getModel() { return model; }
+    QTextEdit* getResultView();
     SqlTextEdit* getEditor();
 
 public slots:
@@ -38,7 +38,6 @@ public slots:
 private:
     DBBrowserDB* db;
     Ui::SqlExecutionArea* ui;
-    SQLiteSyntaxHighlighter* highlighter;
     SqliteTableModel* model;
     QMenu* menuPopupSave;
 };

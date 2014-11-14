@@ -1,6 +1,7 @@
 #include "DbStructureModel.h"
 #include "sqlitedb.h"
 #include "sqlitetablemodel.h"
+#include "PreferencesDialog.h"
 
 #include <QTreeWidgetItem>
 #include <QMimeData>
@@ -36,7 +37,9 @@ QVariant DbStructureModel::data(const QModelIndex& index, int role) const
 
     // Depending on the role either return the text or the icon
     if(role == Qt::DisplayRole)
-        return item->text(index.column());
+        return PreferencesDialog::getSettingsValue("db", "hideschemalinebreaks").toBool() ? item->text(index.column()).replace("\n", " ") : item->text(index.column());
+    else if(role == Qt::ToolTipRole)
+        return item->text(index.column());  // Don't modify the text when it's supposed to be shown in a tooltip
     else if(role == Qt::DecorationRole)
         return item->icon(index.column());
     else
@@ -169,13 +172,17 @@ void DbStructureModel::reloadData(DBBrowserDB* db)
         // If it is a table or view add the field Nodes
         if((*it).gettype() == "table" || (*it).gettype() == "view")
         {
-            for(int i=0; i < it->fldmap.size(); ++i)
+            for(int i=0; i < (*it).table.fields().size(); ++i)
             {
                 QTreeWidgetItem *fldItem = new QTreeWidgetItem(tableItem);
-                fldItem->setText(0, (*it).fldmap.at(i)->name());
+                fldItem->setText(0, (*it).table.fields().at(i)->name());
                 fldItem->setText(1, "field");
-                fldItem->setText(2, (*it).fldmap.at(i)->type());
-                fldItem->setIcon(0, QIcon(":/icons/field"));
+                fldItem->setText(2, (*it).table.fields().at(i)->type());
+                fldItem->setText(3, (*it).table.fields().at(i)->toString("  ", " "));
+                if((*it).table.fields().at(i)->primaryKey())
+                    fldItem->setIcon(0, QIcon(":/icons/field_key"));
+                else
+                    fldItem->setIcon(0, QIcon(":/icons/field"));
             }
         }
     }

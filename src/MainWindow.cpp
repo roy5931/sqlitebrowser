@@ -15,6 +15,8 @@
 #include "VacuumDialog.h"
 #include "DbStructureModel.h"
 #include "gen_version.h"
+#include "sqlite.h"
+#include "CipherDialog.h"
 
 #include <QFileDialog>
 #include <QFile>
@@ -28,7 +30,6 @@
 #include <QScrollBar>
 #include <QSortFilterProxyModel>
 #include <QElapsedTimer>
-#include <sqlite3.h>
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QNetworkAccessManager>
@@ -38,14 +39,14 @@
 #include <QDesktopServices>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
+#include <QInputDialog>
+#include <QProgressDialog>
 
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       ui(new Ui::MainWindow),
       m_browseTableModel(new SqliteTableModel(this, &db, PreferencesDialog::getSettingsValue("db", "prefetchsize").toInt())),
-      sqliteHighlighterLogUser(0),
-      sqliteHighlighterLogApp(0),
       editWin(new EditDialog(this)),
       gotoValidator(new QIntValidator(0, 0, this))
 {
@@ -64,8 +65,9 @@ MainWindow::~MainWindow()
 
 void MainWindow::init()
 {
-    // Init the SQL log dock
-    db.mainWindow = this;
+    // Connect SQL logging and database state setting to main window
+    connect(&db, SIGNAL(dbChanged(bool)), this, SLOT(dbState(bool)));
+    connect(&db, SIGNAL(sqlExecuted(QString, int)), this, SLOT(logSql(QString,int)));
 
     // Set the validator for the goto line edit
     ui->editGoto->setValidator(gotoValidator);
@@ -78,6 +80,16 @@ void MainWindow::init()
     ui->dbTreeWidget->setModel(dbStructureModel);
     ui->dbTreeWidget->setColumnHidden(1, true);
     ui->dbTreeWidget->setColumnWidth(0, 300);
+
+    // Set up DB schema dock
+    ui->treeSchemaDock->setModel(dbStructureModel);
+    ui->treeSchemaDock->setColumnHidden(1, true);
+    ui->treeSchemaDock->setColumnWidth(0, 300);
+
+    // Add keyboard shortcuts
+    QList<QKeySequence> shortcuts = ui->actionExecuteSql->shortcuts();
+    shortcuts.push_back(QKeySequence(tr("Ctrl+Return")));
+    ui->actionExecuteSql->setShortcuts(shortcuts);
 
     // Create the actions for the recently opened dbs list
     for(int i = 0; i < MaxRecentFiles; ++i) {
@@ -96,16 +108,23 @@ void MainWindow::init()
     popupTableMenu->addSeparator();
     popupTableMenu->addAction(ui->actionExportCsvPopup);
 
-    // Set state of checkable menu actions
+    // Add menu item for log dock
     ui->viewMenu->insertAction(ui->viewDBToolbarAction, ui->dockLog->toggleViewAction());
     ui->viewMenu->actions().at(0)->setShortcut(QKeySequence(tr("Ctrl+L")));
     ui->viewMenu->actions().at(0)->setIcon(QIcon(":/icons/log_dock"));
     ui->viewDBToolbarAction->setChecked(!ui->toolbarDB->isHidden());
 
-    // Plot view menu
+    // Add menu item for plot dock
     ui->viewMenu->insertAction(ui->viewDBToolbarAction, ui->dockPlot->toggleViewAction());
-    ui->viewMenu->actions().at(1)->setShortcut(QKeySequence(tr("Ctrl+P")));
+    QList<QKeySequence> plotkeyseqlist;
+    plotkeyseqlist << QKeySequence(tr("Ctrl+P")) << QKeySequence(tr("Ctrl+D"));
+    ui->viewMenu->actions().at(1)->setShortcuts(plotkeyseqlist);
     ui->viewMenu->actions().at(1)->setIcon(QIcon(":/icons/log_dock"));
+
+    // Add menu item for schema dock
+    ui->viewMenu->insertAction(ui->viewDBToolbarAction, ui->dockSchema->toggleViewAction());
+    ui->viewMenu->actions().at(2)->setShortcut(QKeySequence(tr("Ctrl+I")));
+    ui->viewMenu->actions().at(2)->setIcon(QIcon(":/icons/log_dock"));
 
     // Set statusbar fields
     statusEncodingLabel = new QLabel(ui->statusbar);
@@ -114,8 +133,14 @@ void MainWindow::init()
     statusEncodingLabel->setToolTip(tr("Database encoding"));
     ui->statusbar->addPermanentWidget(statusEncodingLabel);
 
+    statusEncryptionLabel = new QLabel(ui->statusbar);
+    statusEncryptionLabel->setEnabled(false);
+    statusEncryptionLabel->setVisible(false);
+    statusEncryptionLabel->setText("Encrypted");
+    statusEncryptionLabel->setToolTip(tr("Database is encrypted using SQLCipher"));
+    ui->statusbar->addPermanentWidget(statusEncryptionLabel);
+
     // Connect some more signals and slots
-    connect(ui->dataTable->filterHeader(), SIGNAL(filterChanged(int,QString)), this, SLOT(setRecordsetLabel()));
     connect(ui->dataTable->filterHeader(), SIGNAL(sectionClicked(int)), this, SLOT(browseTableHeaderClicked(int)));
     connect(ui->dataTable->verticalScrollBar(), SIGNAL(valueChanged(int)), this, SLOT(setRecordsetLabel()));
     connect(ui->dataTable->horizontalHeader(), SIGNAL(sectionResized(int,int,int)), this, SLOT(updateBrowseDataColumnWidth(int,int,int)));
@@ -124,7 +149,8 @@ void MainWindow::init()
     connect(ui->dbTreeWidget->selectionModel(), SIGNAL(currentChanged(QModelIndex,QModelIndex)), this, SLOT(changeTreeSelection()));
 
     // Load window settings
-    tabifyDockWidget(ui->dockPlot, ui->dockLog);
+    tabifyDockWidget(ui->dockLog, ui->dockPlot);
+    tabifyDockWidget(ui->dockLog, ui->dockSchema);
     restoreGeometry(PreferencesDialog::getSettingsValue("MainWindow", "geometry").toByteArray());
     restoreState(PreferencesDialog::getSettingsValue("MainWindow", "windowState").toByteArray());
     ui->comboLogSubmittedBy->setCurrentIndex(ui->comboLogSubmittedBy->findText(PreferencesDialog::getSettingsValue("SQLLogDock", "Log").toString()));
@@ -148,6 +174,11 @@ void MainWindow::init()
     QUrl url("https://raw.github.com/sqlitebrowser/sqlitebrowser/master/currentrelease");
     m_NetworkManager->get(QNetworkRequest(url));
 #endif
+
+#ifndef ENABLE_SQLCIPHER
+    // Only show encrpytion menu action when SQLCipher support is enabled
+    ui->actionEncryption->setVisible(false);
+#endif
 }
 
 void MainWindow::clearCompleterModelsFields()
@@ -161,7 +192,7 @@ void MainWindow::clearCompleterModelsFields()
     completerModelsFields.clear();
 }
 
-bool MainWindow::fileOpen(const QString& fileName)
+bool MainWindow::fileOpen(const QString& fileName, bool dontAddToRecentFiles)
 {
     bool retval = false;
 
@@ -176,21 +207,32 @@ bool MainWindow::fileOpen(const QString& fileName)
     if(QFile::exists(wFile) )
     {
         fileClose();
-        if(db.open(wFile))
+
+        // Try opening it as a project file first
+        if(loadProject(wFile))
         {
-            statusEncodingLabel->setText(db.getPragma("encoding"));
-            setCurrentFile(wFile);
             retval = true;
         } else {
-            // Failed opening file; so it might be a SQLiteBrowser project file
-            return loadProject(wFile);
+            // No project file; so it should be a database file
+            if(db.open(wFile))
+            {
+                statusEncodingLabel->setText(db.getPragma("encoding"));
+                statusEncryptionLabel->setVisible(db.encrypted());
+                setCurrentFile(wFile);
+                if(!dontAddToRecentFiles)
+                    addToRecentFilesMenu(wFile);
+                openSqlTab(true);
+                loadExtensionsFromSettings();
+                populateStructure();
+                resetBrowser();
+                if(ui->mainTab->currentIndex() == 2)
+                    loadPragmas();
+                retval = true;
+            } else {
+                QMessageBox::warning(this, qApp->applicationName(), tr("Invalid file format."));
+                return false;
+            }
         }
-        loadExtensionsFromSettings();
-        populateStructure();
-        resetBrowser();
-        if(ui->mainTab->currentIndex() == 2)
-            loadPragmas();
-        openSqlTab(true);
     }
 
     return retval;
@@ -205,6 +247,7 @@ void MainWindow::fileNew()
             QFile::remove(fileName);
         db.create(fileName);
         setCurrentFile(fileName);
+        addToRecentFilesMenu(fileName);
         statusEncodingLabel->setText(db.getPragma("encoding"));
         loadExtensionsFromSettings();
         populateStructure();
@@ -223,13 +266,14 @@ void MainWindow::populateStructure()
     db.updateSchema();
     dbStructureModel->reloadData(&db);
     ui->dbTreeWidget->expandToDepth(0);
+    ui->treeSchemaDock->expandToDepth(0);
 
     if(!db.isOpen())
         return;
 
     QStringList tblnames = db.getBrowsableObjectNames();
-    sqliteHighlighterLogUser->setTableNames(tblnames);
-    sqliteHighlighterLogApp->setTableNames(tblnames);
+    ui->editLogUser->syntaxHighlighter()->setTableNames(tblnames);
+    ui->editLogApplication->syntaxHighlighter()->setTableNames(tblnames);
 
     // setup models for sqltextedit autocomplete
     completerModelTables.setRowCount(tblnames.count());
@@ -248,13 +292,13 @@ void MainWindow::populateStructure()
         if((*it).gettype() == "table" || (*it).gettype() == "view")
         {
             QStandardItemModel* tablefieldmodel = new QStandardItemModel();
-            tablefieldmodel->setRowCount((*it).fldmap.count());
+            tablefieldmodel->setRowCount((*it).table.fields().count());
             tablefieldmodel->setColumnCount(1);
 
             int fldrow = 0;
-            for(int i=0; i < (*it).fldmap.size(); ++i, ++fldrow)
+            for(int i=0; i < (*it).table.fields().size(); ++i, ++fldrow)
             {
-                QString fieldname = (*it).fldmap.at(i)->name();
+                QString fieldname = (*it).table.fields().at(i)->name();
                 QStandardItem* fldItem = new QStandardItem(fieldname);
                 fldItem->setIcon(QIcon(":/icons/field"));
                 tablefieldmodel->setItem(fldrow, 0, fldItem);
@@ -270,9 +314,12 @@ void MainWindow::populateStructure()
         sqlarea->getEditor()->setDefaultCompleterModel(&completerModelTables);
         sqlarea->getEditor()->insertFieldCompleterModels(completerModelsFields);
     }
+
+    // Resize SQL column to fit contents
+    ui->dbTreeWidget->resizeColumnToContents(3);
 }
 
-void MainWindow::populateTable( const QString & tablename)
+void MainWindow::populateTable(const QString & tablename, bool bKeepFilter)
 {
     // Remove the model-view link if the table name is empty in order to remove any data from the view
     if(tablename.isEmpty())
@@ -312,7 +359,7 @@ void MainWindow::populateTable( const QString & tablename)
     ui->dataTable->filterHeader()->setSortIndicator(curBrowseOrderByIndex, curBrowseOrderByMode);
 
     // Update the filter row
-    qobject_cast<FilterTableHeader*>(ui->dataTable->horizontalHeader())->generateFilters(m_browseTableModel->columnCount());
+    qobject_cast<FilterTableHeader*>(ui->dataTable->horizontalHeader())->generateFilters(m_browseTableModel->columnCount(), bKeepFilter);
 
     // Activate the add and delete record buttons and editing only if a table has been selected
     bool is_table = db.getObjectByName(tablename).gettype() == "table";
@@ -346,7 +393,7 @@ void MainWindow::resetBrowser()
         objmap[i.value().getname()] = i.value();;
     }
 
-    // finaly fill the combobox in sorted order
+    // Finally fill the combobox in sorted order
     for(QMap<QString, DBBrowserObject>::ConstIterator it=objmap.constBegin();
         it!=objmap.constEnd();
         ++it)
@@ -368,16 +415,19 @@ void MainWindow::resetBrowser()
 
 void MainWindow::fileClose()
 {
-    db.close();
+    if(!db.close())
+        return;
+
     setWindowTitle(QApplication::applicationName());
     resetBrowser();
     populateStructure();
     loadPragmas();
+    statusEncryptionLabel->setVisible(false);
 
     // Delete the model for the Browse tab and create a new one
     delete m_browseTableModel;
     m_browseTableModel = new SqliteTableModel(this, &db, PreferencesDialog::getSettingsValue("db", "prefetchsize").toInt());
-    connect(ui->dataTable->filterHeader(), SIGNAL(filterChanged(int,QString)), m_browseTableModel, SLOT(updateFilter(int,QString)));
+    connect(ui->dataTable->filterHeader(), SIGNAL(filterChanged(int,QString)), this, SLOT(updateFilter(int,QString)));
 
     // Remove all stored column widths for the browse data table
     browseTableColumnWidths.clear();
@@ -396,13 +446,17 @@ void MainWindow::fileClose()
 
 void MainWindow::closeEvent( QCloseEvent* event )
 {
-    db.close();
-    PreferencesDialog::setSettingsValue("MainWindow", "geometry", saveGeometry());
-    PreferencesDialog::setSettingsValue("MainWindow", "windowState", saveState());
-    PreferencesDialog::setSettingsValue("SQLLogDock", "Log", ui->comboLogSubmittedBy->currentText());
-    PreferencesDialog::setSettingsValue("PlotDock", "splitterSize", ui->splitterForPlot->saveState());
-    clearCompleterModelsFields();
-    QMainWindow::closeEvent(event);
+    if(db.close())
+    {
+        PreferencesDialog::setSettingsValue("MainWindow", "geometry", saveGeometry());
+        PreferencesDialog::setSettingsValue("MainWindow", "windowState", saveState());
+        PreferencesDialog::setSettingsValue("SQLLogDock", "Log", ui->comboLogSubmittedBy->currentText());
+        PreferencesDialog::setSettingsValue("PlotDock", "splitterSize", ui->splitterForPlot->saveState());
+        clearCompleterModelsFields();
+        QMainWindow::closeEvent(event);
+    } else {
+        event->ignore();
+    }
 }
 
 void MainWindow::addRecord()
@@ -506,7 +560,7 @@ void MainWindow::setRecordsetLabel()
 
 void MainWindow::browseRefresh()
 {
-    populateTable(ui->comboBrowseTable->currentText());
+    populateTable(ui->comboBrowseTable->currentText(), true);
 }
 
 void MainWindow::createTable()
@@ -634,7 +688,7 @@ void MainWindow::doubleClickTable(const QModelIndex& index)
 /*
  * I'm still not happy how the results are represented to the user
  * right now you only see the result of the last executed statement.
- * A better experiance would be tabs on the bottom with query results
+ * A better experience would be tabs on the bottom with query results
  * for all the executed statements.
  * Or at least a some way the use could see results/status message
  * per executed statement.
@@ -665,6 +719,7 @@ void MainWindow::executeQuery()
     QByteArray utf8Query = query.toUtf8();
     const char *tail = utf8Query.data();
     int sql3status = 0;
+    int tail_length = utf8Query.length();
     QString statusMessage;
     bool modified = false;
     bool wasdirty = db.getDirty();
@@ -681,16 +736,19 @@ void MainWindow::executeQuery()
     do
     {
         const char* qbegin = tail;
-        sql3status = sqlite3_prepare_v2(db._db,tail,utf8Query.length(),
+        sql3status = sqlite3_prepare_v2(db._db,tail, tail_length,
                             &vm, &tail);
         QString queryPart = QString::fromUtf8(qbegin, tail - qbegin);
+        tail_length -= (tail - qbegin);
         if (sql3status == SQLITE_OK){
             sql3status = sqlite3_step(vm);
             sqlite3_finalize(vm);
 
             // SQLite returns SQLITE_DONE when a valid SELECT statement was executed but returned no results. To run into the branch that updates
-            // the status message and the table view anyway manipulate the status value here.
-            if(queryPart.trimmed().startsWith("SELECT", Qt::CaseInsensitive) && sql3status == SQLITE_DONE)
+            // the status message and the table view anyway manipulate the status value here. This is also done for PRAGMA statements as they (sometimes)
+            // return rows just like SELECT statements, too.
+            if((queryPart.trimmed().startsWith("SELECT", Qt::CaseInsensitive) ||
+               queryPart.trimmed().startsWith("PRAGMA", Qt::CaseInsensitive)) && sql3status == SQLITE_DONE)
                 sql3status = SQLITE_ROW;
 
             switch(sql3status)
@@ -794,6 +852,8 @@ void MainWindow::dbState( bool dirty )
 {
     ui->fileSaveAction->setEnabled(dirty);
     ui->fileRevertAction->setEnabled(dirty);
+    ui->fileAttachAction->setEnabled(!dirty);
+    //ui->actionEncryption->setEnabled(!dirty);
 }
 
 void MainWindow::fileSave()
@@ -845,7 +905,7 @@ void MainWindow::importDatabaseFromSQL()
     if(!QFile::exists(fileName))
         return;
 
-    // If there is already a database file opened ask the user wether to import into this one or a new one. If no DB is opened just ask for a DB name directly
+    // If there is already a database file opened ask the user whether to import into this one or a new one. If no DB is opened just ask for a DB name directly
     QString newDbFile;
     if((db.isOpen() && QMessageBox::question(this,
                                             QApplication::applicationName(),
@@ -880,7 +940,7 @@ void MainWindow::importDatabaseFromSQL()
     f.close();
     QApplication::restoreOverrideCursor();
 
-    // Resfresh window when importing into an existing DB or - when creating a new file - just open it correctly
+    // Refresh window when importing into an existing DB or - when creating a new file - just open it correctly
     if(newDbFile.size())
     {
         fileOpen(newDbFile);
@@ -895,14 +955,6 @@ void MainWindow::openPreferences()
     PreferencesDialog dialog(this);
     if(dialog.exec())
         reloadSettings();
-}
-
-void MainWindow::createSyntaxHighlighters()
-{
-    delete sqliteHighlighterLogApp;
-    delete sqliteHighlighterLogUser;
-    sqliteHighlighterLogApp = new SQLiteSyntaxHighlighter(ui->editLogApplication->document());
-    sqliteHighlighterLogUser = new SQLiteSyntaxHighlighter(ui->editLogUser->document());
 }
 
 //******************************************************************
@@ -982,10 +1034,13 @@ void MainWindow::setCurrentFile(const QString &fileName)
     setWindowFilePath(fileName);
     setWindowTitle( QApplication::applicationName() +" - "+fileName);
     activateFields(true);
+}
 
+void MainWindow::addToRecentFilesMenu(const QString& filename)
+{
     QStringList files = PreferencesDialog::getSettingsValue("General", "recentFileList").toStringList();
-    files.removeAll(fileName);
-    files.prepend(fileName);
+    files.removeAll(filename);
+    files.prepend(filename);
     while (files.size() > MaxRecentFiles)
         files.removeLast();
 
@@ -1042,6 +1097,7 @@ void MainWindow::activateFields(bool enable)
     ui->actionSqlOpenTab->setEnabled(enable);
     ui->actionSqlSaveFile->setEnabled(enable);
     ui->actionSaveProject->setEnabled(enable);
+    ui->actionEncryption->setEnabled(enable);
 }
 
 void MainWindow::browseTableHeaderClicked(int logicalindex)
@@ -1144,10 +1200,10 @@ void MainWindow::logSql(const QString& sql, int msgtype)
 {
     if(msgtype == kLogMsg_User)
     {
-        ui->editLogUser->append(sql);
+        ui->editLogUser->appendPlainText(sql);
         ui->editLogUser->verticalScrollBar()->setValue(ui->editLogUser->verticalScrollBar()->maximum());
     } else {
-        ui->editLogApplication->append(sql);
+        ui->editLogApplication->appendPlainText(sql);
         ui->editLogApplication->verticalScrollBar()->setValue(ui->editLogApplication->verticalScrollBar()->maximum());
     }
 }
@@ -1257,27 +1313,31 @@ void MainWindow::loadExtensionsFromSettings()
 
 void MainWindow::reloadSettings()
 {
+    // Read settings
+    int prefetch_size = PreferencesDialog::getSettingsValue("db", "prefetchsize").toInt();
+    int edit_fontsize = PreferencesDialog::getSettingsValue("editor", "fontsize").toInt();
+    int log_fontsize = PreferencesDialog::getSettingsValue("log", "fontsize").toInt();
+
+    QFont logfont("Monospace");
+    logfont.setStyleHint(QFont::TypeWriter);
+    logfont.setPointSize(log_fontsize);
+
     // Set prefetch sizes for lazy population of table models
-    m_browseTableModel->setChunkSize(PreferencesDialog::getSettingsValue("db", "prefetchsize").toInt());
+    m_browseTableModel->setChunkSize(prefetch_size);
     for(int i=0; i < ui->tabSqlAreas->count(); ++i)
     {
         SqlExecutionArea* sqlArea = qobject_cast<SqlExecutionArea*>(ui->tabSqlAreas->widget(i));
-        sqlArea->getModel()->setChunkSize(PreferencesDialog::getSettingsValue("db", "prefetchsize").toInt());
+        sqlArea->getModel()->setChunkSize(prefetch_size);
+        sqlArea->getResultView()->setFont(logfont);
 
         QFont font = sqlArea->getEditor()->font();
-        font.setPointSize(PreferencesDialog::getSettingsValue("editor", "fontsize").toInt());
+        font.setPointSize(edit_fontsize);
         sqlArea->getEditor()->setFont(font);
     }
 
-    // Create the syntax highlighters
-    createSyntaxHighlighters();
-
     // Set font for SQL logs
-    QFont font("Monospace");
-    font.setStyleHint(QFont::TypeWriter);
-    font.setPointSize(PreferencesDialog::getSettingsValue("log", "fontsize").toInt());
-    ui->editLogApplication->setFont(font);
-    ui->editLogUser->setFont(font);
+    ui->editLogApplication->setFont(logfont);
+    ui->editLogUser->setFont(logfont);
 
     // Load extensions
     loadExtensionsFromSettings();
@@ -1346,7 +1406,7 @@ void MainWindow::httpresponse(QNetworkReply *reply)
                 msgBox.addButton(QMessageBox::Ok);
                 msgBox.setTextFormat(Qt::RichText);
                 msgBox.setWindowTitle(tr("New version available."));
-                msgBox.setText(tr("A new sqlitebrowser version is available (%1.%2.%3).<br/><br/>"
+                msgBox.setText(tr("A new DB Browser for SQLite version is available (%1.%2.%3).<br/><br/>"
                                   "Please download at <a href='%4'>%4</a>.").arg(major).arg(minor).arg(patch).
                                     arg(QString(reply->readLine()).trimmed()));
                 msgBox.exec();
@@ -1400,7 +1460,7 @@ QVariant::Type guessdatatype(SqliteTableModel* model, int column)
 
 void MainWindow::updatePlot(SqliteTableModel *model, bool update)
 {
-    // add columns to x/y seleciton tree widget
+    // add columns to x/y selection tree widget
     if(update)
     {
         // disconnect treeplotcolumns item changed updates
@@ -1635,7 +1695,7 @@ void MainWindow::on_butSavePlot_clicked()
 {
     QString fileName = QFileDialog::getSaveFileName(this,
                                                     tr("Choose a filename to save under"),
-                                                    QString(),
+                                                    PreferencesDialog::getSettingsValue("db", "defaultlocation").toString(),
                                                     tr("PNG(*.png);;JPG(*.jpg);;PDF(*.pdf);;BMP(*.bmp);;All Files(*)")
                                                     );
     if(!fileName.isEmpty())
@@ -1691,8 +1751,8 @@ bool MainWindow::loadProject(QString filename)
     {
         filename = QFileDialog::getOpenFileName(this,
                                                 tr("Choose a file to open"),
-                                                QString(),
-                                                tr("SQLiteBrowser project(*.sqbpro)"));
+                                                PreferencesDialog::getSettingsValue("db", "defaultlocation").toString(),
+                                                tr("DB Browser for SQLite project file (*.sqbpro)"));
     }
 
     if(!filename.isEmpty())
@@ -1704,10 +1764,9 @@ bool MainWindow::loadProject(QString filename)
         xml.readNext();     // token == QXmlStreamReader::StartDocument
         xml.readNext();     // name == sqlb_project
         if(xml.name() != "sqlb_project")
-        {
-            QMessageBox::warning(this, qApp->applicationName(), tr("Invalid file format."));
             return false;
-        }
+
+        addToRecentFilesMenu(filename);
 
         while(!xml.atEnd() && !xml.hasError())
         {
@@ -1720,7 +1779,10 @@ bool MainWindow::loadProject(QString filename)
                 if(xml.name() == "db")
                 {
                     // DB file
-                    fileOpen(xml.attributes().value("path").toString());
+                    QString dbfilename = xml.attributes().value("path").toString();
+                    if(!QFile::exists(dbfilename))
+                        dbfilename = QFileInfo(filename).absolutePath() + QDir::separator() + dbfilename;
+                    fileOpen(dbfilename, true);
                     ui->dbTreeWidget->collapseAll();
                 } else if(xml.name() == "window") {
                     // Window settings
@@ -1828,11 +1890,15 @@ void MainWindow::saveProject()
 {
     QString filename = QFileDialog::getSaveFileName(this,
                                                     tr("Choose a filename to save under"),
-                                                    QString(),
-                                                    tr("SQLiteBrowser project(*.sqbpro)")
+                                                    PreferencesDialog::getSettingsValue("db", "defaultlocation").toString(),
+                                                    tr("DB Browser for SQLite project file (*.sqbpro)")
                                                     );
     if(!filename.isEmpty())
     {
+        // Make sure the file has got a .sqbpro ending
+        if(!filename.endsWith(".sqbpro", Qt::CaseInsensitive))
+            filename.append(".sqbpro");
+
         QFile file(filename);
         file.open(QFile::WriteOnly | QFile::Text);
         QXmlStreamWriter xml(&file);
@@ -1899,5 +1965,93 @@ void MainWindow::saveProject()
         xml.writeEndElement();
         xml.writeEndDocument();
         file.close();
+        addToRecentFilesMenu(filename);
     }
+}
+
+void MainWindow::fileAttach()
+{
+    // Get file name of database to attach
+    QString file = QFileDialog::getOpenFileName(
+                this,
+                tr("Choose a database file"),
+                PreferencesDialog::getSettingsValue("db", "defaultlocation").toString());
+    if(!QFile::exists(file))
+        return;
+
+    // Ask for name to be given to the attached database
+    QString attachAs = QInputDialog::getText(this,
+                                             qApp->applicationName(),
+                                             tr("Please specify the database name under which you want to access the attached database")
+                                             ).trimmed();
+    if(attachAs.isEmpty())
+        return;
+
+    // Attach database
+    if(!db.executeSQL(QString("ATTACH '%1' AS `%2`").arg(file).arg(attachAs), false))
+        QMessageBox::warning(this, qApp->applicationName(), db.lastErrorMessage);
+}
+
+void MainWindow::updateFilter(int column, const QString& value)
+{
+    m_browseTableModel->updateFilter(column ,value);
+    setRecordsetLabel();
+}
+
+void MainWindow::editEncryption()
+{
+#ifdef ENABLE_SQLCIPHER
+    CipherDialog dialog(this, true);
+    if(dialog.exec())
+    {
+        // Show progress dialog even though we can't provide any detailed progress information but this
+        // process might take some time.
+        QProgressDialog progress(this);
+        progress.setCancelButton(0);
+        progress.setWindowModality(Qt::ApplicationModal);
+        progress.show();
+        qApp->processEvents();
+
+        // Apply all unsaved changes
+        bool ok = db.saveAll();
+        qApp->processEvents();
+
+        // Create the new file first or it won't work
+        if(ok)
+        {
+            QFile file(db.curDBFilename + ".enctemp");
+            file.open(QFile::WriteOnly);
+            file.close();
+        }
+
+        // Attach a new database using the new settings
+        qApp->processEvents();
+        if(ok)
+            ok = db.executeSQL(QString("ATTACH DATABASE '%1' AS sqlitebrowser_edit_encryption KEY '%2';").arg(db.curDBFilename + ".enctemp").arg(dialog.password()),
+                               false, false);
+        qApp->processEvents();
+        if(ok)
+            ok = db.executeSQL(QString("PRAGMA sqlitebrowser_edit_encryption.cipher_page_size = %1").arg(dialog.pageSize()), false, false);
+
+        // Export the current database to the new one
+        qApp->processEvents();
+        if(ok)
+            ok = db.executeSQL("SELECT sqlcipher_export('sqlitebrowser_edit_encryption');", false, false);
+
+        // Check for errors
+        qApp->processEvents();
+        if(ok)
+        {
+            // No errors: Then close the current database, switch names, open the new one and if that succeeded delete the old one
+
+            fileClose();
+            QFile::rename(db.curDBFilename, db.curDBFilename + ".enctempold");
+            QFile::rename(db.curDBFilename + ".enctemp", db.curDBFilename);
+            if(fileOpen(db.curDBFilename))
+                QFile::remove(db.curDBFilename + ".enctempold");
+        } else {
+            QMessageBox::warning(this, qApp->applicationName(), db.lastErrorMessage);
+        }
+    }
+#endif
 }

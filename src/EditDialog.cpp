@@ -13,6 +13,7 @@ EditDialog::EditDialog(QWidget* parent)
       ui(new Ui::EditDialog)
 {
     ui->setupUi(this);
+    ui->buttonBox->button(QDialogButtonBox::Ok)->setShortcut(QKeySequence(Qt::CTRL + Qt::Key_Return));
 
     QHBoxLayout* hexLayout = new QHBoxLayout(ui->editorBinary);
     hexEdit = new QHexEdit(this);
@@ -139,7 +140,7 @@ void EditDialog::editTextChanged()
 void EditDialog::hexDataChanged()
 {
     // Update the text editor accordingly
-    ui->editorText->setPlainText(hexEdit->data());
+    ui->editorText->setPlainText(QString::fromUtf8(hexEdit->data().constData(), hexEdit->data().size()));
 }
 
 void EditDialog::checkDataType()

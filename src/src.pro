@@ -12,8 +12,8 @@ CONFIG += warn_on
 # create a unittest option
 CONFIG(unittest) {
   CONFIG += qtestlib
-  HEADERS += tests/testsqlobjects.h
-  SOURCES += tests/testsqlobjects.cpp
+  HEADERS += tests/testsqlobjects.h tests/TestImport.h
+  SOURCES += tests/testsqlobjects.cpp tests/TestImport.cpp tests/TestMain.cpp
 } else {
   SOURCES += main.cpp
 }
@@ -31,6 +31,7 @@ HEADERS += \
     ImportCsvDialog.h \
     sqltextedit.h \
     sqlitetypes.h \
+    csvparser.h \
     ExtendedTableWidget.h \
     grammar/Sqlite3Lexer.hpp \
     grammar/Sqlite3Parser.hpp \
@@ -41,7 +42,9 @@ HEADERS += \
     SqlExecutionArea.h \
     VacuumDialog.h \
     DbStructureModel.h \
-    Application.h
+    Application.h \
+    sqlite.h \
+    CipherDialog.h
 
 SOURCES += \
     sqlitedb.cpp \
@@ -56,6 +59,7 @@ SOURCES += \
     ImportCsvDialog.cpp \
     sqltextedit.cpp \
     sqlitetypes.cpp \
+    csvparser.cpp \
     ExtendedTableWidget.cpp \
     grammar/Sqlite3Lexer.cpp \
     grammar/Sqlite3Parser.cpp \
@@ -64,7 +68,8 @@ SOURCES += \
     SqlExecutionArea.cpp \
     VacuumDialog.cpp \
     DbStructureModel.cpp \
-    Application.cpp
+    Application.cpp \
+    CipherDialog.cpp
 
 RESOURCES += icons/icons.qrc
 
@@ -78,10 +83,21 @@ FORMS += \
     ExportCsvDialog.ui \
     ImportCsvDialog.ui \
     SqlExecutionArea.ui \
-    VacuumDialog.ui
+    VacuumDialog.ui \
+    CipherDialog.ui
 
 TRANSLATIONS += \
-    translations/tr_de.ts
+    translations/sqlb_cn.ts \
+    translations/sqlb_de.ts \
+    translations/sqlb_fr.ts \
+    translations/sqlb_ru.ts
+
+CONFIG(sqlcipher) {
+	QMAKE_CXXFLAGS += -DENABLE_SQLCIPHER
+	LIBS += -lsqlcipher
+} else {
+	LIBS += -lsqlite3
+}
 
 LIBPATH_QHEXEDIT=$$PWD/../libs/qhexedit
 LIBPATH_ANTLR=$$PWD/../libs/antlr-2.7.7
@@ -111,9 +127,13 @@ mac {
             -L/usr/local/opt/sqlite/lib \
             -framework Carbon
     QMAKE_INFO_PLIST = app.plist
+    QMAKE_CXXFLAGS += -DCHECKNEWVERSION
 }
 
 UI_DIR = .ui
 INCLUDEPATH += $$PWD/../libs/antlr-2.7.7 $$PWD/../libs/qhexedit $$PWD/../libs/qcustomplot-source $$PWD/..
-LIBS += -L$$LIBPATH_QHEXEDIT -L$$LIBPATH_ANTLR -L$$LIBPATH_QCUSTOMPLOT -lantlr -lqhexedit -lqcustomplot -lsqlite3
+LIBS += -L$$LIBPATH_QHEXEDIT -L$$LIBPATH_ANTLR -L$$LIBPATH_QCUSTOMPLOT -lantlr -lqhexedit -lqcustomplot
 DEPENDPATH += $$PWD/../libs/antlr-2.7.7 $$PWD/../libs/qhexedit $$PWD/../libs/qcustomplot-source
+
+# Rules for creating/updating {ts|qm}-files
+include(i18n.pri)

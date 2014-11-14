@@ -37,7 +37,7 @@ public:
 	public: void id();
 	public: void databasename();
 	public: void tablename();
-	public: void columnname();
+	public: void nonkeyword_columnname();
 	public: void identifier();
 	public: void collationname();
 	public: void signednumber();
@@ -50,21 +50,24 @@ public:
 	public: void tableconstraint();
 	public: void selectstmt();
 	public: void keywordascolumnname();
+	public: void columnname();
 	public: void type_name();
 	public: void columnconstraint();
 	public: void name();
 	public: void conflictclause();
 	public: void expr();
+	public: void literalvalue();
 	public: void foreignkeyclause();
 	public: void indexedcolumn();
 	public: void functionname();
 	public: void subexpr();
 	public: void binaryoperator();
-	public: void literalvalue();
 	public: void castexpr();
 	public: void caseexpr();
 	public: void raisefunction();
 	public: void suffixexpr();
+	public: void like_operator();
+	public: void between_subexpr();
 public:
 	ANTLR_USE_NAMESPACE(antlr)RefAST getAST()
 	{
@@ -76,10 +79,10 @@ protected:
 private:
 	static const char* tokenNames[];
 #ifndef NO_STATIC_CONSTS
-	static const int NUM_TOKENS = 105;
+	static const int NUM_TOKENS = 107;
 #else
 	enum {
-		NUM_TOKENS = 105
+		NUM_TOKENS = 107
 	};
 #endif
 	
@@ -127,16 +130,6 @@ private:
 	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_20;
 	static const unsigned long _tokenSet_21_data_[];
 	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_21;
-	static const unsigned long _tokenSet_22_data_[];
-	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_22;
-	static const unsigned long _tokenSet_23_data_[];
-	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_23;
-	static const unsigned long _tokenSet_24_data_[];
-	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_24;
-	static const unsigned long _tokenSet_25_data_[];
-	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_25;
-	static const unsigned long _tokenSet_26_data_[];
-	static const ANTLR_USE_NAMESPACE(antlr)BitSet _tokenSet_26;
 };
 
 #endif /*INC_Sqlite3Parser_hpp_*/

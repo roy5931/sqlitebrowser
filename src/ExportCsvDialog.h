@@ -1,5 +1,5 @@
-#ifndef __EXPORTCSVDIALOG_H__
-#define __EXPORTCSVDIALOG_H__
+#ifndef EXPORTCSVDIALOG_H
+#define EXPORTCSVDIALOG_H
 
 #include <QDialog>
 
@@ -26,6 +26,12 @@ private:
     DBBrowserDB* pdb;
 
     QString m_sQuery;
+
+    void setQuoteChar(const QChar& c);
+    char currentQuoteChar() const;
+
+    void setSeparatorChar(const QChar& c);
+    char currentSeparatorChar() const;
 };
 
 #endif

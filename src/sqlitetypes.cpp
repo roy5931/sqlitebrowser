@@ -15,11 +15,13 @@ QString Field::toString(const QString& indent, const QString& sep) const
     if(m_notnull)
         str += " NOT NULL";
     if(!m_defaultvalue.isEmpty())
-        str += QString(" DEFAULT '%1'").arg(m_defaultvalue);
+        str += QString(" DEFAULT %1").arg(m_defaultvalue);
     if(!m_check.isEmpty())
         str += " CHECK(" + m_check + ")";
     if(m_autoincrement)
         str += " PRIMARY KEY AUTOINCREMENT";
+    if(m_unique)
+        str += " UNIQUE";
     return str;
 }
 
@@ -55,7 +57,7 @@ bool Field::isInteger() const
 void Table::clear()
 {
     m_fields.clear();
-    m_rowidColumn = "rowid";
+    m_rowidColumn = "_rowid_";
 }
 
 Table::~Table()
@@ -116,6 +118,16 @@ QStringList Table::fieldList() const
     return sl;
 }
 
+QStringList Table::fieldNames() const
+{
+    QStringList sl;
+
+    foreach(FieldPtr f, m_fields)
+        sl << f->name();
+
+    return sl;
+}
+
 bool Table::hasAutoIncrement() const
 {
     foreach(FieldPtr f, m_fields) {
@@ -125,7 +137,7 @@ bool Table::hasAutoIncrement() const
     return false;
 }
 
-Table Table::parseSQL(const QString &sSQL)
+QPair<Table, bool> Table::parseSQL(const QString &sSQL)
 {
     std::stringstream s;
     s << sSQL.toStdString();
@@ -141,60 +153,19 @@ Table Table::parseSQL(const QString &sSQL)
     {
         parser.createtable();
         CreateTableWalker ctw(parser.getAST());
-        return ctw.table();
+        return qMakePair(ctw.table(), ctw.modifysupported());
+    }
+    catch(antlr::ANTLRException& ex)
+    {
+        qCritical() << "Sqlite parse error: " << QString::fromStdString(ex.toString()) << "(" << sSQL << ")";
     }
     catch(...)
     {
         qCritical() << "Sqlite parse error: " << sSQL; //TODO
     }
 
-    return Table("");
+    return qMakePair(Table(""), false);
 }
-QString Table::emptyInsertStmt() const
-{
-    QString stmt = QString("INSERT INTO `%1`").arg(m_name);
-
-    QStringList vals;
-    QStringList fields;
-    foreach(FieldPtr f, m_fields) {
-        if(f->notnull())
-        {
-            fields << f->name();
-            if( f->primaryKey() && f->isInteger() )
-            {
-                vals << "NULL";
-            } else {
-                if(f->isInteger())
-                    vals << "0";
-                else
-                    vals << "''";
-            }
-        }
-        else
-        {
-            // don't insert into fields with a default value
-            // or we will never see it.
-            if(f->defaultValue().length() == 0)
-            {
-                fields << f->name();
-                vals << "NULL";
-            }
-        }
-    }
-
-    if(!fields.empty())
-    {
-        stmt.append("(`");
-        stmt.append(fields.join("`,`"));
-        stmt.append("`)");
-    }
-    stmt.append(" VALUES (");
-    stmt.append(vals.join(","));
-    stmt.append(");");
-
-    return stmt;
-}
-
 
 QString Table::sql() const
 {
@@ -219,10 +190,18 @@ QString Table::sql() const
         if(pks_found)
             sql += pk + ")";
     }
+
+    // foreign keys
+    foreach(FieldPtr f, m_fields)
+    {
+        if(!f->foreignKey().isEmpty())
+            sql += QString(",\n\tFOREIGN KEY(`%1`) REFERENCES %2").arg(f->name()).arg(f->foreignKey());
+    }
+
     sql += "\n)";
 
     // without rowid
-    if(m_rowidColumn != "rowid")
+    if(isWithoutRowidTable())
         sql += " WITHOUT ROWID";
 
     return sql + ";";
@@ -243,15 +222,15 @@ QString identifier(antlr::RefAST ident)
     return sident;
 }
 
-QString concatTextAST(antlr::RefAST t)
+QString concatTextAST(antlr::RefAST t, bool withspace = false)
 {
-    QString stext;
+    QStringList stext;
     while(t != antlr::nullAST)
     {
         stext.append(t->getText().c_str());
         t = t->getNextSibling();
     }
-    return stext;
+    return stext.join(withspace ? " " : "");
 }
 }
 
@@ -312,16 +291,97 @@ Table CreateTableWalker::table()
                         int fieldindex = tab.findField(col);
                         if(fieldindex != -1)
                             tab.fields().at(fieldindex)->setPrimaryKey(true);
-                        tc = tc->getNextSibling(); // skip ident and comma
+
                         tc = tc->getNextSibling();
+                        if(tc != antlr::nullAST
+                                && (tc->getType() == sqlite3TokenTypes::ASC
+                                    || tc->getType() == sqlite3TokenTypes::DESC))
+                        {
+                            // TODO save ASC / DESC information?
+                            m_bModifySupported = false;
+                            tc = tc->getNextSibling();
+                        }
+
+                        if(tc != antlr::nullAST && tc->getType() == sqlite3TokenTypes::AUTOINCREMENT)
+                        {
+                            tab.fields().at(fieldindex)->setAutoIncrement(true);
+                            tc = tc->getNextSibling();
+                        }
+                        while(tc != antlr::nullAST && tc->getType() == sqlite3TokenTypes::COMMA)
+                        {
+                            tc = tc->getNextSibling(); // skip ident and comma
+                        }
                     } while(tc != antlr::nullAST && tc->getType() != sqlite3TokenTypes::RPAREN);
                 }
                 break;
-                default: break;
+                case sqlite3TokenTypes::UNIQUE:
+                {
+                    tc = tc->getNextSibling(); // skip UNIQUE
+                    tc = tc->getNextSibling(); // skip LPAREN
+                    QVector<int> uniquefieldsindex;
+                    do
+                    {
+                        QString col = identifier(tc);
+                        int fieldindex = tab.findField(col);
+                        if(fieldindex != -1)
+                            uniquefieldsindex.append(fieldindex);
+
+                        tc = tc->getNextSibling();
+                        if(tc != antlr::nullAST
+                                && (tc->getType() == sqlite3TokenTypes::ASC
+                                    || tc->getType() == sqlite3TokenTypes::DESC))
+                        {
+                            // TODO save ASC / DESC information?
+                            m_bModifySupported = false;
+                            tc = tc->getNextSibling();
+                        }
+
+                        while(tc != antlr::nullAST && tc->getType() == sqlite3TokenTypes::COMMA)
+                        {
+                            tc = tc->getNextSibling(); // skip ident and comma
+                        }
+                    } while(tc != antlr::nullAST && tc->getType() != sqlite3TokenTypes::RPAREN);
+
+                    if(uniquefieldsindex.size() == 1)
+                    {
+                        tab.fields().at(uniquefieldsindex[0])->setUnique(true);
+                    }
+                    else
+                    {
+                        // else save on table a unique with more than one field
+                        m_bModifySupported = false;
+                    }
+                }
+                break;
+                case sqlite3TokenTypes::FOREIGN:
+                {
+                    tc = tc->getNextSibling();  // FOREIGN
+                    tc = tc->getNextSibling();  // KEY
+                    tc = tc->getNextSibling();  // LPAREN
+                    QString column_name = identifier(tc);
+                    tc = tc->getNextSibling();  // identifier
+                    if(tc->getType() == sqlite3TokenTypes::COMMA)
+                    {
+                        // No support for composite foreign keys
+                        m_bModifySupported = false;
+                        break;
+                    }
+                    tc = tc->getNextSibling();  // RPAREN
+                    tc = tc->getNextSibling();  // REFERENCES
+
+                    tab.fields().at(tab.findField(column_name))->setForeignKey(concatTextAST(tc, true));
+                }
+                break;
+                default:
+                {
+                    m_bModifySupported = false;
+                }
+                    break;
                 }
 
                 s = s->getNextSibling(); //COMMA or RPAREN
-                s = s->getNextSibling();
+                if(s->getType() == sqlite3TokenTypes::COMMA || s->getType() == sqlite3TokenTypes::RPAREN)
+                    s = s->getNextSibling();
             } else {
                 // It is
 
@@ -343,6 +403,7 @@ void CreateTableWalker::parsecolumn(FieldPtr& f, antlr::RefAST c)
     bool autoincrement = false;
     bool primarykey = false;
     bool notnull = false;
+    bool unique = false;
     QString defaultvalue;
     QString check;
 
@@ -365,7 +426,10 @@ void CreateTableWalker::parsecolumn(FieldPtr& f, antlr::RefAST c)
 
         // skip constraint name, if there is any
         if(con->getType() == sqlite3TokenTypes::CONSTRAINT)
+        {
+            m_bModifySupported = false;
             con = con->getNextSibling()->getNextSibling();
+        }
 
         switch(con->getType())
         {
@@ -375,7 +439,10 @@ void CreateTableWalker::parsecolumn(FieldPtr& f, antlr::RefAST c)
             con = con->getNextSibling()->getNextSibling(); // skip KEY
             if(con != antlr::nullAST && (con->getType() == sqlite3TokenTypes::ASC
                                          || con->getType() == sqlite3TokenTypes::DESC))
+            {
+                m_bModifySupported = false;
                 con = con->getNextSibling(); //skip
+            }
             if(con != antlr::nullAST && con->getType() == sqlite3TokenTypes::AUTOINCREMENT)
                 autoincrement = true;
         }
@@ -388,10 +455,11 @@ void CreateTableWalker::parsecolumn(FieldPtr& f, antlr::RefAST c)
         case sqlite3TokenTypes::CHECK:
         {
             con = con->getNextSibling(); //LPAREN
-            check = concatTextAST(con);
+            check = concatTextAST(con, true);
             // remove parenthesis
             check.remove(check.length()-1, 1);
             check.remove(0,1);
+            check = check.trimmed();
         }
         break;
         case sqlite3TokenTypes::DEFAULT:
@@ -400,12 +468,21 @@ void CreateTableWalker::parsecolumn(FieldPtr& f, antlr::RefAST c)
             defaultvalue = concatTextAST(con);
         }
         break;
-        default: break;
+        case sqlite3TokenTypes::UNIQUE:
+        {
+            unique = true;
+        }
+        break;
+        default:
+        {
+            m_bModifySupported = false;
+        }
+        break;
         }
         c = c->getNextSibling();
     }
 
-    f = FieldPtr( new Field(columnname, type, notnull, defaultvalue, check, primarykey));
+    f = FieldPtr( new Field(columnname, type, notnull, defaultvalue, check, primarykey, unique));
     f->setAutoIncrement(autoincrement);
 }
 

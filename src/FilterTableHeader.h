@@ -1,11 +1,12 @@
-#ifndef __FILTERTABLEHEADER_H__
-#define __FILTERTABLEHEADER_H__
+#ifndef FILTERTABLEHEADER_H
+#define FILTERTABLEHEADER_H
 
 #include <QHeaderView>
 #include <QList>
 
 class QLineEdit;
 class QTableView;
+class FilterLineEdit;
 
 class FilterTableHeader : public QHeaderView
 {
@@ -16,7 +17,7 @@ public:
     virtual QSize sizeHint() const;
     
 public slots:
-    void generateFilters(int number);
+    void generateFilters(int number, bool bKeepValues = false);
     void adjustPositions();
 
 signals:
@@ -29,7 +30,7 @@ private slots:
     void inputChanged(const QString& new_value);
 
 private:
-    QList<QLineEdit*> filterWidgets;
+    QList<FilterLineEdit*> filterWidgets;
 };
 
 #endif

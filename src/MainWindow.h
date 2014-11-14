@@ -1,5 +1,5 @@
-#ifndef MAINFORM_H
-#define MAINFORM_H
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
 
 #include "sqltextedit.h"
 #include "sqlitedb.h"
@@ -10,7 +10,6 @@
 
 class QDragEnterEvent;
 class EditDialog;
-class SQLiteSyntaxHighlighter;
 class QStandardItemModel;
 class QIntValidator;
 class QLabel;
@@ -73,9 +72,7 @@ private:
     QMenu *recentFilesMenu;
 
     QLabel* statusEncodingLabel;
-
-    SQLiteSyntaxHighlighter* sqliteHighlighterLogUser;
-    SQLiteSyntaxHighlighter* sqliteHighlighterLogApp;
+    QLabel* statusEncryptionLabel;
 
     DbStructureModel* dbStructureModel;
 
@@ -102,6 +99,7 @@ private:
 
     void updateRecentFileActions();
     void setCurrentFile(const QString& fileName);
+    void addToRecentFilesMenu(const QString& filename);
     void activateFields(bool enable = true);
     void loadExtensionsFromSettings();
 
@@ -112,7 +110,7 @@ protected:
     void resizeEvent(QResizeEvent *event);
 
 public slots:
-    bool fileOpen(const QString& fileName = QString());
+    bool fileOpen(const QString& fileName = QString(), bool dontAddToRecentFiles = false);
     void logSql(const QString &sql, int msgtype);
     void dbState(bool dirty);
     void browseRefresh();
@@ -122,7 +120,7 @@ private slots:
     void changeTreeSelection();
     void fileNew();
     void populateStructure();
-    void populateTable(const QString& tablename);
+    void populateTable(const QString& tablename, bool bKeepFilter = false);
     void resetBrowser();
     void fileClose();
     void addRecord();
@@ -157,7 +155,6 @@ private slots:
     void savePragmas();
     void mainTabSelected( int tabindex );
     void browseTableHeaderClicked(int logicalindex);
-    void createSyntaxHighlighters();
     unsigned int openSqlTab(bool resetCounter = false);
     void closeSqlTab(int index, bool force = false);
     void openSqlFile();
@@ -175,6 +172,9 @@ private slots:
     void updateBrowseDataColumnWidth(int section, int /*old_size*/, int new_size);
     bool loadProject(QString filename = QString());
     void saveProject();
+    void fileAttach();
+    void updateFilter(int column, const QString& value);
+    void editEncryption();
 };
 
 #endif

@@ -1,9 +1,10 @@
-#ifndef __IMPORTCSVDIALOG_H__
-#define __IMPORTCSVDIALOG_H__
+#ifndef IMPORTCSVDIALOG_H
+#define IMPORTCSVDIALOG_H
 
 #include <QDialog>
 
 class DBBrowserDB;
+class QCompleter;
 
 namespace Ui {
 class ImportCsvDialog;
@@ -26,9 +27,16 @@ private:
     Ui::ImportCsvDialog* ui;
     QString csvFilename;
     DBBrowserDB* pdb;
+    QCompleter* encodingCompleter;
 
-    char currentQuoteChar();
-    char currentSeparatorChar();
+    void setQuoteChar(const QChar& c);
+    char currentQuoteChar() const;
+
+    void setSeparatorChar(const QChar& c);
+    char currentSeparatorChar() const;
+
+    void setEncoding(const QString& sEnc);
+    QString currentEncoding() const;
 };
 
 #endif

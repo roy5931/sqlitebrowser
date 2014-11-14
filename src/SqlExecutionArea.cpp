@@ -20,8 +20,11 @@ SqlExecutionArea::SqlExecutionArea(QWidget* parent, DBBrowserDB* _db) :
     // Create UI
     ui->setupUi(this);
 
-    // Create syntax highlighter
-    highlighter = new SQLiteSyntaxHighlighter(ui->editEditor->document());
+    // Set font
+    QFont logfont("Monospace");
+    logfont.setStyleHint(QFont::TypeWriter);
+    logfont.setPointSize(PreferencesDialog::getSettingsValue("log", "fontsize").toInt());
+    ui->editErrors->setFont(logfont);
 
     // Create model
     model = new SqliteTableModel(this, db, PreferencesDialog::getSettingsValue("db", "prefetchsize").toInt());
@@ -41,7 +44,7 @@ SqlExecutionArea::~SqlExecutionArea()
 
 void SqlExecutionArea::setTableNames(const QStringList& tables)
 {
-    highlighter->setTableNames(tables);
+    ui->editEditor->syntaxHighlighter()->setTableNames(tables);
 }
 
 QString SqlExecutionArea::getSql() const
@@ -57,12 +60,24 @@ QString SqlExecutionArea::getSelectedSql() const
 void SqlExecutionArea::finishExecution(const QString& result)
 {
     ui->editErrors->setText(result);
+
+    // Set column widths according to their contents but make sure they don't exceed a certain size
     ui->tableResult->resizeColumnsToContents();
+    for(int i=0;i<model->columnCount();i++)
+    {
+        if(ui->tableResult->columnWidth(i) > 300)
+            ui->tableResult->setColumnWidth(i, 300);
+    }
 }
 
 SqlTextEdit* SqlExecutionArea::getEditor()
 {
     return ui->editEditor;
+}
+
+QTextEdit* SqlExecutionArea::getResultView()
+{
+    return ui->editErrors;
 }
 
 void SqlExecutionArea::enableSaveButton(bool enable)

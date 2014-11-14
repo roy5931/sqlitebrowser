@@ -20,6 +20,7 @@ tokens {
   ASC="ASC";
   AND="AND";
   OR="OR";
+  BETWEEN="BETWEEN";
   CASCADE="CASCADE";
   CASE_T="CASE";
   CAST="CAST";
@@ -47,9 +48,12 @@ tokens {
   TABLE="TABLE";
   IF_T="IF";
   IGNORE="IGNORE";
+  IN="IN";
   INITIALLY="INITIALLY";
+  INSERT="INSERT";
   IMMEDIATE="IMMEDIATE";
   IS="IS";
+  NO="NO";
   NOT="NOT";
   NULL_T="NULL";
   MATCH="MATCH";
@@ -101,14 +105,14 @@ QUOTEDID
 	;
 
 QUOTEDLITERAL
-  : '"' ( ~('"') )* '"'
+  : '"' ( ~'"' | ('"' '"' ) )* '"'
   ;
 
 NUMERIC
     : ( (DIGIT)+ ( '.' (DIGIT)* )?
       | '.' { _ttype=DOT; } (DIGIT)+)
       ( 'e' (PLUS|MINUS)? (DIGIT)+ )?
-	; 
+	;
 
 protected
 NL :
@@ -131,14 +135,14 @@ WS :
 STRINGLITERAL
   :
 //  '"' ( ESC_SEQ | ~('\\'|'"') )* '"'
-  '\'' ( ~('\'') )* '\''
+  '\'' ( ~'\'' | ('\'' '\'') )* '\''
   ;
 
 //protected
 //ESC_SEQ
 //    :   '\\' ('b'|'t'|'n'|'f'|'r'|'\"'|'\''|'\\')
 //    ;
-    
+
 LPAREN	:	'(';
 RPAREN	:	')';
 COMMA	:	',';
@@ -167,6 +171,7 @@ class Sqlite3Parser extends Parser;
 options {
   k=2;
   buildAST = true;
+  defaultErrorHandler=false;
 }
 
 id : ID | QUOTEDID | QUOTEDLITERAL | STRINGLITERAL ;
@@ -175,17 +180,17 @@ databasename
   :
   id
   ;
-	
+
 tablename
   :
   id
   ;
-	
-columnname
+
+nonkeyword_columnname
   :
   id
   ;
-    
+
 identifier
   :
   ((databasename)? DOT)? tablename
@@ -200,7 +205,7 @@ signednumber
   : (PLUS | MINUS)? NUMERIC
 //	{#signednumber = #([SIGNEDNUMBER, "SIGNEDNUMBER"], #signednumber);}
   ;
-		
+
 // parser part
 statementlist
   :
@@ -212,7 +217,7 @@ statement
   :
   createtable
   ;
-	
+
 create_statements
   :
   createtable
@@ -254,7 +259,7 @@ keywordastablename
 createtable
   :
   CREATE (TEMP|TEMPORARY)? TABLE (IF_T NOT EXISTS)? (tablename | keywordastablename)
-  ( LPAREN columndef (COMMA columndef)* (COMMA tableconstraint)* RPAREN (WITHOUT ROWID)?
+  ( LPAREN columndef (COMMA columndef)* ((COMMA)? tableconstraint)* RPAREN (WITHOUT ROWID)?
   | AS selectstmt
   )
   {#createtable = #([CREATETABLE, "CREATETABLE"], #createtable);}
@@ -296,7 +301,6 @@ keywordascolumnname
   | INITIALLY
   | IMMEDIATE
   | IS
-  | NOT
   | NULL_T
   | MATCH
   | EXISTS
@@ -307,6 +311,7 @@ keywordascolumnname
   | REPLACE
   | RESTRICT
   | ROLLBACK
+  | ROWID
   | SET
   | TEMPORARY
   | TEMP
@@ -317,12 +322,20 @@ keywordascolumnname
   {#keywordascolumnname = #([KEYWORDASCOLUMNNAME, "KEYWORDASCOLUMNNAME"], #keywordascolumnname);}
   ;
 
+columnname
+  :
+  ( nonkeyword_columnname
+  | keywordascolumnname
+  )
+  {}
+  ;
+
 columndef
   :
-  (columnname | keywordascolumnname) (type_name)? (columnconstraint)*
+  columnname (type_name)? (columnconstraint)*
   {#columndef = #([COLUMNDEF, "COLUMNDEF"], #columndef);}
   ;
-	
+
 name : ID | QUOTEDID | QUOTEDLITERAL | STRINGLITERAL;
 
 type_name
@@ -331,7 +344,7 @@ type_name
   (LPAREN signednumber (COMMA signednumber)? RPAREN)?
   {#type_name = #([TYPE_NAME, "TYPE_NAME"], #type_name);}
   ;
-	
+
 columnconstraint
   :
   (CONSTRAINT name)?
@@ -339,12 +352,12 @@ columnconstraint
   | (NOT)? NULL_T (conflictclause)?
   | UNIQUE (conflictclause)?
   | CHECK LPAREN expr RPAREN
-  | DEFAULT (signednumber | QUOTEDLITERAL | STRINGLITERAL | LPAREN expr RPAREN)
+  | DEFAULT (signednumber | QUOTEDLITERAL | STRINGLITERAL | LPAREN expr RPAREN | literalvalue)
   | COLLATE collationname
   | foreignkeyclause)
   {#columnconstraint = #([COLUMNCONSTRAINT, "COLUMNCONSTRAINT"], #columnconstraint);}
   ;
-	
+
 tableconstraint
   :
   (CONSTRAINT name)?
@@ -355,11 +368,12 @@ tableconstraint
   )
   {#tableconstraint = #([TABLECONSTRAINT, "TABLECONSTRAINT"], #tableconstraint);}
   ;
-	
+
 indexedcolumn
-  : id	
+  :
+  columnname (COLLATE collationname)? (ASC|DESC)? (AUTOINCREMENT)?
   ;
-	
+
 conflictclause
   :
   ON CONFLICT
@@ -370,11 +384,11 @@ conflictclause
   | REPLACE
   )
   ;
-	
+
 foreignkeyclause
   :
   REFERENCES tablename (LPAREN columnname (COMMA columnname)* RPAREN)?
-  ( ON (DELETE | UPDATE)
+  ( ON (DELETE | UPDATE | INSERT)
     ( SET (NULL_T | DEFAULT)
     | CASCADE
     | RESTRICT
@@ -385,7 +399,7 @@ foreignkeyclause
   ( (NOT DEFERRABLE) => NOT DEFERRABLE (INITIALLY (DEFERRED | IMMEDIATE))?
   | DEFERRABLE (INITIALLY (DEFERRED | IMMEDIATE) ) )?
   ;
-	
+
 selectstmt
   : SELECT
   ;
@@ -395,8 +409,7 @@ functionname
 
 expr
   :
-  ( subexpr (binaryoperator | AND | OR) ) => subexpr ( ( binaryoperator | AND | OR) subexpr )*
-  | subexpr
+  subexpr ((binaryoperator | AND | OR) subexpr )*
   ;
 
 subexpr
@@ -406,9 +419,9 @@ subexpr
 //  | bindparameter TODO
   | ((databasename DOT)? tablename)? columnname
   | functionname LPAREN (expr (COMMA expr)* )? RPAREN //TODO
-  | castexpr 
+  | castexpr
   | (EXISTS)? LPAREN (expr | selectstmt) RPAREN
-  | caseexpr 
+  | caseexpr
   | raisefunction
   )
   (suffixexpr)?
@@ -424,19 +437,31 @@ caseexpr
   CASE_T (expr)? (WHEN expr THEN expr)+ (ELSE_T expr)? END
   ;
 
+like_operator
+  :
+  LIKE
+  | GLOB
+  | REGEXP
+  | MATCH
+  ;
+
+between_subexpr
+  :
+  subexpr (AND subexpr)+
+  ;
+
 suffixexpr
   :
-   COLLATE collationname
-//  | (NOT)? 
-//    ( (LIKE | GLOB | REGEXP | MATCH) 
-//		( (expr ESCAPE) => ESCAPE expr | expr)
- //   | IN ( LPAREN (selectstmt | expr (COMMA expr)* )? RPAREN | tablename)
-//    )
-  
+  COLLATE collationname
+  | (NOT)?
+	( BETWEEN subexpr ((binaryoperator | OR) subexpr )* AND expr
+	| IN ( LPAREN (selectstmt | expr (COMMA expr)* )? RPAREN | tablename)
+    | like_operator subexpr (ESCAPE subexpr)?
+    )
   ;
-	
+
 literalvalue
-  :	
+  :
     NUMERIC
 //  | STRINGLITERAL // captured by columnname
 //  | blob-literal
@@ -450,13 +475,12 @@ raisefunction
   : RAISE LPAREN ( IGNORE | (ROLLBACK | ABORT | FAIL) COMMA STRINGLITERAL ) RPAREN ;
 
 binaryoperator
-  :	
-    OROP	
+  :
+    OROP
   | STAR | SLASH | PERCENT
   | PLUS | MINUS
   | BITWISELEFT | BITWISERIGHT | AMPERSAND | BITOR
   | LOWER | LOWEREQUAL | GREATER | GREATEREQUAL
-  | EQUAL | EQUAL2 | UNEQUAL | UNEQUAL2 
-  | IS | IN | LIKE | GLOB | MATCH | REGEXP
+  | EQUAL | EQUAL2 | UNEQUAL | UNEQUAL2
+  | IS | like_operator
   ;
-

@@ -1,12 +1,17 @@
-# SQLite Database Browser
+# DB Browser for SQLite
 
-![SQLiteBrowser Screenshot](https://github.com/sqlitebrowser/sqlitebrowser/raw/master/images/sqlitebrowser.png "SQLiteBrowser Screenshot")
+[![Build Status](https://travis-ci.org/sqlitebrowser/sqlitebrowser.svg?branch=master)](https://travis-ci.org/sqlitebrowser/sqlitebrowser)
+
+![DB Browser for SQLite Screenshot](https://github.com/sqlitebrowser/sqlitebrowser/raw/master/images/sqlitebrowser.png "DB Browser for SQLite Screenshot")
 
 ## What it is
 
-SQLite Database Browser is a high quality, visual, open source tool to create, design, and edit database files compatible with SQLite.
+DB Browser for SQLite is a high quality, visual, open source tool to
+create, design, and edit database files compatible with SQLite.
 
-It is for users and developers wanting to create databases, search, and edit data.  It uses a familiar spreadsheet-like interface, and you don't need to learn complicated SQL commands.
+It is for users and developers wanting to create databases, search, and edit
+data.  It uses a familiar spreadsheet-like interface, and you don't need to
+learn complicated SQL commands.
 
 Controls and wizards are available for users to:
 
@@ -23,75 +28,53 @@ Controls and wizards are available for users to:
 
 ## What it is not
 
-This program is not a visual shell for the sqlite command line tool. It does not require familiarity with SQL commands. It is a tool to be used both by developers and by end users, and it must remain as simple to use as possible in order to achieve its goals.
+This program is not a visual shell for the sqlite command line tool. It does
+not require familiarity with SQL commands. It is a tool to be used both by
+developers and by end users, and it must remain as simple to use as possible
+in order to achieve its goals.
 
-## What's been done since the SourceForge project
-
-* Qt3Support was removed
-* Recent files menu added
-* Improved UI, making it more modern, replacing some dialogs etc.
-* Syntax highlighting for SQL code
-* Cleaned up the code, reducing the SLOC quite a bit
-* Added basic support for triggers and views
-* Added pragma editing
-* Added BLOB support
-* Added a new filter row for searching
-* Improved performance when opening large tables
-* Extended the SQL tab
-* Added SQLite extension support
-* Fixed a ton of bugs
-* Probably more
-
-All in all a fair amount of the code has been rewritten in order to regain
-maintainability.  Based on this quite a few bugs can be fixed and new
-features added.
-
-## What's still to do
-
-* Even more code cleanup
-* Further improvement of the UI, adding more features and making it easier to use
-* Feel free to add more issues at
-  https://github.com/sqlitebrowser/sqlitebrowser/issues
-
-## Windows binaries
+## Windows
 
 Windows binaries can be downloaded from here:
 
 * https://github.com/sqlitebrowser/sqlitebrowser/releases
 
-Nightly builds are also available at:
+Nightly builds (uncompress them with [7-Zip](http://www.7-zip.org)) are available at:
 
 * http://rp.oldsch00l.com/sqlitebrowser/
 
 ## MacOS X
 
-SQLite Database Browser works well on MacOS X.
+DB Browser for SQLite works well on MacOS X.
 
-* OSX 10.7 (Lion), 10.8 (Mountain Lion) and 10.9 (Mavericks) are tested and known to work
+* OSX 10.6 (Snow Leopard) - 10.10 (Yosemite) are tested and known to work
 
-Building on OSX is simple, but requires SQLite and Qt 4.8.x to be installed
-first.  These are the Homebrew steps, though other package managers should
-work:
+OSX binaries can be downloaded from here:
 
-    $ brew install sqlite --with-functions
-    $ brew install qt
+* https://github.com/sqlitebrowser/sqlitebrowser/releases
 
-Then it's just a matter of getting the source:
+Nightly builds for OSX are available at:
 
-    $ git clone https://github.com/sqlitebrowser/sqlitebrowser.git
+* http://mirror.salasaga.org/sqlitebrowser/nightly/
 
-**Note** - Don't clone the repo to a directory with a quote character (') in
-it's name (eg ~/tmp/foo').  There's an open bug for that which [breaks the build](https://github.com/sqlitebrowser/sqlitebrowser/issues/10).
+## Linux
 
-And compiling it:
+DB Browser for SQLite works well on Linux.  Some Linux distributions, such as
+Arch Linux and Ubuntu, provide a package ready for use.  On others you'll need
+to compile it yourself using the (simple) instructions in BUILDING.md.
 
-    $ cd sqlitebrowser
-    $ qmake
-    $ make
-    $ mv src/sqlitebrowser.app /Applications/
+## FreeBSD
 
-An icon for "sqlitebrowser" should now be in your main OSX Applications
-list, ready to launch.
+DB Browser for SQLite works well on FreeBSD, although you need to compile it
+yourself using the generic instructions in BUILDING.md.
+
+If someone creates a FreeBSD Port or PCBSD package for this, please let us know
+so we can update these instructions. :)
+
+### Compiling
+
+Instructions for compiling on (at least) Windows, OSX, Linux, and FreeBSD are
+in BUILDING.md.
 
 ## Twitter
 
@@ -101,13 +84,16 @@ Follow us on Twitter: https://twitter.com/sqlitebrowser
 
 * http://sqlitebrowser.org
 
-## Old project pages
+## Old project page
 
-* http://sqlitebrowser.sourceforge.net
 * https://sourceforge.net/projects/sqlitebrowser
 
 ## Releases
 
+* [Version 3.4.0 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/v3.4.0) - 2014-10-29
+* [Version 3.3.1 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/v3.3.1) - 2014-08-31 - Project renamed from "SQLite Database Browser"
+* [Version 3.3.0 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/v3.3.0) - 2014-08-24
+* [Version 3.2.0 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/sqlb-3.2.0) - 2014-07-06
 * [Version 3.1.0 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/sqlb-3.1.0) - 2014-05-17
 * [Version 3.0.3 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/sqlb-3.0.3) - 2014-04-28
 * [Version 3.0.2 released](https://github.com/sqlitebrowser/sqlitebrowser/releases/tag/sqlb-3.0.2) - 2014-02-12
@@ -122,18 +108,42 @@ Follow us on Twitter: https://twitter.com/sqlitebrowser
 
 ## History
 
-This program was developed originally by Mauricio Piacentini ([@piacentini](https://github.com/piacentini)) from Tabuleiro Producoes, as the Arca Database Browser. The original version was used as a free companion tool to the Arca Database Xtra, a commercial product that embeds SQLite databases with some additional extensions to handle compressed and binary data.
+This program was developed originally by Mauricio Piacentini
+([@piacentini](https://github.com/piacentini)) from Tabuleiro Producoes, as
+the Arca Database Browser. The original version was used as a free companion
+tool to the Arca Database Xtra, a commercial product that embeds SQLite
+databases with some additional extensions to handle compressed and binary data.
 
-The original code was trimmed and adjusted to be compatible with standard SQLite 2.x databases. The resulting program was renamed SQLite Database Browser, and released into the Public Domain by Mauricio. Icons were contributed by [Raquel Ravanini](http://www.raquelravanini.com), also from Tabuleiro. Jens Miltner ([@jmiltner](https://github.com/jmiltner)) contributed the code to support SQLite 3.x databases for the 1.2 release.
+The original code was trimmed and adjusted to be compatible with standard
+SQLite 2.x databases. The resulting program was renamed SQLite Database
+Browser, and released into the Public Domain by Mauricio. Icons were
+contributed by [Raquel Ravanini](http://www.raquelravanini.com), also from
+Tabuleiro. Jens Miltner ([@jmiltner](https://github.com/jmiltner)) contributed
+the code to support SQLite 3.x databases for the 1.2 release.
 
-Pete Morgan ([@daffodil](https://github.com/daffodil)) created an initial project on GitHub with the code in 2012, where several contributors fixed and improved pieces over the years. René Peinthor ([@rp-](https://github.com/rp-)) and Martin Kleusberg ([@MKleusberg](https://github.com/MKleusberg)) then became involved, and have been the main driving force from that point.  Justin Clift ([@justinclift](https://github.com/justinclift)) helps out with testing on OSX, and started the new github.com/sqlitebrowser organisation on GitHub.
+Pete Morgan ([@daffodil](https://github.com/daffodil)) created an initial
+project on GitHub with the code in 2012, where several contributors fixed and
+improved pieces over the years. René Peinthor ([@rp-](https://github.com/rp-))
+and Martin Kleusberg ([@MKleusberg](https://github.com/MKleusberg)) then
+became involved, and have been the main driving force from that point.  Justin
+Clift ([@justinclift](https://github.com/justinclift)) helps out with testing
+on OSX, and started the new github.com/sqlitebrowser organisation on GitHub.
 
-[John T. Haller](http://johnhaller.com), of [PortableApps.com](http://portableapps.com) fame, created the new logo.  He based it on the Tango icon set (public domain).
+[John T. Haller](http://johnhaller.com), of
+[PortableApps.com](http://portableapps.com) fame, created the new logo.  He
+based it on the Tango icon set (public domain).
+
+In August 2014, the project was renamed to "Database Browser for SQLite" at
+the request of [Richard Hipp](http://www.hwaci.com/drh) (creator of
+[SQLite](http://sqlite.org)), as the previous name was creating unintended
+support issues.
+
+In September 2014, the project was renamed to "DB Browser for SQLite", to
+avoid confusion with an existing application called "Database Browser".
 
 ## License
 
-SQLite Database Browser is bi-licensed under the Mozilla Public License
+DB Browser for SQLite is bi-licensed under the Mozilla Public License
 Version 2, as well as the GNU General Public License Version 3 or later.
 
-You can modify or redistribute it under the conditions of these
-licenses.
+You can modify or redistribute it under the conditions of these licenses.

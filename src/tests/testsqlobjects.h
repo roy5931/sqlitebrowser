@@ -1,3 +1,6 @@
+#ifndef TESTSQLOBJECTS_H
+#define TESTSQLOBJECTS_H
+
 #include <QObject>
 
 class TestTable: public QObject
@@ -8,6 +11,7 @@ private slots:
     void autoincrement();
     void notnull();
     void withoutRowid();
+    void foreignKeys();
 
     void parseSQL();
     void parseSQLdefaultexpr();
@@ -17,5 +21,10 @@ private slots:
     void parseSQLKeywordInIdentifier();
     void parseSQLWithoutRowid();
     void parseNonASCIIChars();
+    void parseSQLEscapedQuotes();
+    void parseSQLForeignKeys();
+    void createTableWithIn();
+    void createTableWithNotLikeConstraint();
 };
 
+#endif

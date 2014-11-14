@@ -8,6 +8,7 @@
 #include <QPushButton>
 #include <QComboBox>
 #include <QDateTime>
+#include <QKeyEvent>
 
 EditTableDialog::EditTableDialog(DBBrowserDB* db, const QString& tableName, QWidget* parent)
     : QDialog(parent),
@@ -20,6 +21,7 @@ EditTableDialog::EditTableDialog(DBBrowserDB* db, const QString& tableName, QWid
 {
     // Create UI
     ui->setupUi(this);
+    ui->widgetExtension->setVisible(false);
     connect(ui->treeWidget, SIGNAL(itemChanged(QTreeWidgetItem*,int)),this,SLOT(itemChanged(QTreeWidgetItem*,int)));
 
     m_sqliteSyntaxHighlighter = new SQLiteSyntaxHighlighter(ui->sqlTextEdit->document());
@@ -31,7 +33,8 @@ EditTableDialog::EditTableDialog(DBBrowserDB* db, const QString& tableName, QWid
 
         // Existing table, so load and set the current layout
         QString sTablesql = pdb->getObjectByName(curTable).getsql();
-        m_table = sqlb::Table::parseSQL(sTablesql);
+        m_table = sqlb::Table::parseSQL(sTablesql).first;
+        ui->checkWithoutRowid->setChecked(m_table.isWithoutRowidTable());
         populateFields();
     }
 
@@ -50,13 +53,27 @@ EditTableDialog::~EditTableDialog()
     delete ui;
 }
 
+void EditTableDialog::keyPressEvent(QKeyEvent *evt)
+{
+    if((evt->modifiers() & Qt::ControlModifier)
+            && (evt->key() == Qt::Key_Enter || evt->key() == Qt::Key_Return))
+    {
+        emit accept();
+        return;
+    }
+    if(evt->key() == Qt::Key_Enter || evt->key() == Qt::Key_Return)
+        return;
+    QDialog::keyPressEvent(evt);
+}
+
 void EditTableDialog::updateColumnWidth()
 {
     ui->treeWidget->setColumnWidth(kName, 190);
-    ui->treeWidget->setColumnWidth(kType, 80);
+    ui->treeWidget->setColumnWidth(kType, 100);
     ui->treeWidget->setColumnWidth(kNotNull, 30);
     ui->treeWidget->setColumnWidth(kPrimaryKey, 30);
     ui->treeWidget->setColumnWidth(kAutoIncrement, 30);
+    ui->treeWidget->setColumnWidth(kUnique, 30);
 }
 
 void EditTableDialog::populateFields()
@@ -75,7 +92,7 @@ void EditTableDialog::populateFields()
         tbitem->setText(kName, f->name());
         QComboBox* typeBox = new QComboBox(ui->treeWidget);
         typeBox->setProperty("column", f->name());
-        typeBox->setEditable(false);
+        typeBox->setEditable(true);
         typeBox->addItems(sqlb::Field::Datatypes);
         int index = typeBox->findText(f->type(), Qt::MatchExactly);
         if(index == -1)
@@ -86,13 +103,16 @@ void EditTableDialog::populateFields()
         }
         typeBox->setCurrentIndex(index);
         connect(typeBox, SIGNAL(currentIndexChanged(int)), this, SLOT(updateTypes()));
+        //connect(typeBox, SIGNAL(editTextChanged(QString)), this, SLOT(updateTypes()));
         ui->treeWidget->setItemWidget(tbitem, kType, typeBox);
 
         tbitem->setCheckState(kNotNull, f->notnull() ? Qt::Checked : Qt::Unchecked);
         tbitem->setCheckState(kPrimaryKey, f->primaryKey() ? Qt::Checked : Qt::Unchecked);
         tbitem->setCheckState(kAutoIncrement, f->autoIncrement() ? Qt::Checked : Qt::Unchecked);
+        tbitem->setCheckState(kUnique, f->unique() ? Qt::Checked : Qt::Unchecked);
         tbitem->setText(kDefault, f->defaultValue());
         tbitem->setText(kCheck, f->check());
+        tbitem->setText(kForeignKey, f->foreignKey());
         ui->treeWidget->addTopLevelItem(tbitem);
     }
 
@@ -136,6 +156,7 @@ void EditTableDialog::reject()
 {    
     // Then rollback to our savepoint
     pdb->revert(m_sRestorePointName);
+    pdb->updateSchema();
 
     QDialog::reject();
 }
@@ -229,7 +250,7 @@ void EditTableDialog::itemChanged(QTreeWidgetItem *item, int column)
                 // we need to check for this case and cancel here. Maybe we can think of some way to modify the INSERT INTO ... SELECT statement
                 // to at least replace all troublesome NULL values by the default value
                 SqliteTableModel m(this, pdb);
-                m.setQuery(QString("SELECT COUNT(rowid) FROM `%1` WHERE `%2` IS NULL;").arg(curTable).arg(field->name()));
+                m.setQuery(QString("SELECT COUNT(`%1`) FROM `%2` WHERE `%3` IS NULL;").arg(pdb->getObjectByName(curTable).table.rowidColumn()).arg(curTable).arg(field->name()));
                 if(m.data(m.index(0, 0)).toInt() > 0)
                 {
                     // There is a NULL value, so print an error message, uncheck the combobox, and return here
@@ -287,13 +308,66 @@ void EditTableDialog::itemChanged(QTreeWidgetItem *item, int column)
                 callRenameColumn = true;
         }
         break;
+        case kUnique:
+        {
+            // When editing an existing table and trying to set a column to unique an extra check is needed
+            if(!m_bNewTable && item->checkState(column) == Qt::Checked)
+            {
+                // Because our renameColumn() function fails when setting a column to unique when it already contains the same values
+                SqliteTableModel m(this, pdb);
+                m.setQuery(QString("SELECT COUNT(`%2`) FROM `%1`;").arg(curTable).arg(field->name()));
+                int rowcount = m.data(m.index(0, 0)).toInt();
+                m.setQuery(QString("SELECT COUNT(distinct `%2`) FROM `%1`;").arg(curTable).arg(field->name()));
+                int uniquecount = m.data(m.index(0, 0)).toInt();
+                if(rowcount != uniquecount)
+                {
+                    // There is a NULL value, so print an error message, uncheck the combobox, and return here
+                    QMessageBox::information(this, qApp->applicationName(), tr("Column `%1` has no unique data.\n").arg(field->name())
+                                             + tr("This makes it impossible to set this flag. Please change the table data first."));
+                    item->setCheckState(column, Qt::Unchecked);
+                    return;
+                }
+            }
+            field->setUnique(item->checkState(column) == Qt::Checked);
+
+            if(!m_bNewTable)
+                callRenameColumn = true;
+        }
+        break;
         case kDefault:
+        {
+            QString new_value = item->text(column);
+            // If the default value isn't a SQL keyword perform an extra check: If it isn't numeric but doesn't start and end with quotes,
+            // add the quotes
+            if(new_value.size() && new_value.compare("null", Qt::CaseInsensitive) &&
+                    new_value.compare("current_time", Qt::CaseInsensitive) &&
+                    new_value.compare("current_date", Qt::CaseInsensitive) &&
+                    new_value.compare("current_timestamp", Qt::CaseInsensitive))
+            {
+                if(!((new_value.trimmed().startsWith('\'') ||
+                      new_value.trimmed().startsWith('"')) && (new_value.trimmed().endsWith('\'') || new_value.trimmed().endsWith('"'))))
+                {
+                    bool is_numeric;
+                    new_value.toDouble(&is_numeric);
+                    if(!is_numeric)
+                    {
+                        new_value = QString("'%1'").arg(new_value.replace("'", "''"));
+                        item->setText(column, new_value);
+                    }
+                }
+            }
             field->setDefaultValue(item->text(column));
             if(!m_bNewTable)
                 callRenameColumn = true;
-            break;
+        }
+        break;
         case kCheck:
             field->setCheck(item->text(column));
+            if(!m_bNewTable)
+                callRenameColumn = true;
+            break;
+        case kForeignKey:
+            field->setForeignKey(item->text(column));
             if(!m_bNewTable)
                 callRenameColumn = true;
             break;
@@ -313,14 +387,16 @@ void EditTableDialog::addField()
     tbitem->setText(kName, "Field" + QString::number(ui->treeWidget->topLevelItemCount()));
     QComboBox* typeBox = new QComboBox(ui->treeWidget);
     typeBox->setProperty("column", tbitem->text(kName));
-    typeBox->setEditable(false);
+    typeBox->setEditable(true);
     typeBox->addItems(sqlb::Field::Datatypes);
     ui->treeWidget->setItemWidget(tbitem, kType, typeBox);
     connect(typeBox, SIGNAL(currentIndexChanged(int)), this, SLOT(updateTypes()));
+    //connect(typeBox, SIGNAL(editTextChanged(QString)), this, SLOT(updateTypes()));
 
     tbitem->setCheckState(kNotNull, Qt::Unchecked);
     tbitem->setCheckState(kPrimaryKey, Qt::Unchecked);
     tbitem->setCheckState(kAutoIncrement, Qt::Unchecked);
+    tbitem->setCheckState(kUnique, Qt::Unchecked);
     ui->treeWidget->addTopLevelItem(tbitem);
 
     // add field to table object
@@ -356,7 +432,7 @@ void EditTableDialog::removeField()
     } else {
         // Editing an old one
 
-        // Ask user wether he really wants to delete that column
+        // Ask user whether he really wants to delete that column
         QString msg = tr("Are you sure you want to delete the field '%1'?\nAll data currently stored in this field will be lost.").arg(ui->treeWidget->currentItem()->text(0));
         if(QMessageBox::warning(this, QApplication::applicationName(), msg, QMessageBox::Yes | QMessageBox::Default, QMessageBox::No | QMessageBox::Escape) == QMessageBox::Yes)
         {
@@ -366,7 +442,7 @@ void EditTableDialog::removeField()
             } else {
                 //relayout
                 QString sTablesql = pdb->getObjectByName(curTable).getsql();
-                m_table = sqlb::Table::parseSQL(sTablesql);
+                m_table = sqlb::Table::parseSQL(sTablesql).first;
                 populateFields();
             }
         }
@@ -417,7 +493,7 @@ void EditTableDialog::moveCurrentField(bool down)
         QComboBox* newCombo = new QComboBox(ui->treeWidget);
         newCombo->setProperty("column", oldCombo->property("column"));
         connect(newCombo, SIGNAL(activated(int)), this, SLOT(updateTypes()));
-        newCombo->setEditable(false);
+        newCombo->setEditable(true);
         for(int i=0; i < oldCombo->count(); ++i)
             newCombo->addItem(oldCombo->itemText(i));
         newCombo->setCurrentIndex(oldCombo->currentIndex());
@@ -449,7 +525,7 @@ void EditTableDialog::moveCurrentField(bool down)
         } else {
             // Reload table SQL
             QString sTablesql = pdb->getObjectByName(curTable).getsql();
-            m_table = sqlb::Table::parseSQL(sTablesql);
+            m_table = sqlb::Table::parseSQL(sTablesql).first;
             populateFields();
 
             // Select old item at new position
@@ -459,4 +535,34 @@ void EditTableDialog::moveCurrentField(bool down)
 
     // Update the SQL preview
     updateSqlText();
+}
+
+void EditTableDialog::setWithoutRowid(bool without_rowid)
+{
+    if(without_rowid)
+    {
+        // Before setting the without rowid flag, first perform a check to see if the table meets all thr required criteria for without rowid tables
+        int pk = m_table.findPk();
+        if(pk == -1 || m_table.fields().at(pk)->isInteger() == false || m_table.fields().at(pk)->autoIncrement())
+        {
+            QMessageBox::information(this, QApplication::applicationName(),
+                                     tr("Please add a field which meets the following criteria before setting the without rowid flag:\n"
+                                        " - Primary key flag set\n"
+                                        " - Auto incremenct disabled\n"
+                                        " - Type INTEGER"));
+            ui->checkWithoutRowid->setChecked(false);
+            return;
+        }
+
+        // If it does, override the the rowid column name of the table object with the name of the primary key.
+        m_table.setRowidColumn(m_table.fields().at(pk)->name());
+    } else {
+        // If the without rowid flag is unset no further checks are required. Just set the rowid column name back to "_rowid_"
+        m_table.setRowidColumn("_rowid_");
+    }
+
+    // Update the SQL preview
+    updateSqlText();
+
+    // TODO: Update table if we're editing an existing table
 }

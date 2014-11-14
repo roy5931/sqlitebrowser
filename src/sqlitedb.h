@@ -5,8 +5,8 @@
 
 #include <QStringList>
 #include <QMultiMap>
+#include <QByteArray>
 
-class MainWindow;
 class sqlite3;
 
 enum
@@ -20,25 +20,16 @@ typedef QMultiMap<QString, class DBBrowserObject> objectMap;
 class DBBrowserObject
 {
 public:
-    DBBrowserObject() : name( "" ) { }
+    DBBrowserObject() : table(""), name( "" ) { }
     DBBrowserObject( const QString& wname,const QString& wsql, const QString& wtype, const QString& tbl_name )
-        : name( wname), sql( wsql ), type(wtype), table_name(tbl_name)
+        : table(wname), name( wname), sql( wsql ), type(wtype), table_name(tbl_name)
     { }
-
-    void addField(sqlb::FieldPtr field) { fldmap.push_back(field); }
 
     QString getname() const { return name; }
     QString getsql() const { return sql; }
     QString gettype() const { return type; }
     QString getTableName() const { return table_name; }
-    sqlb::FieldPtr getField(const QString& name) const
-    {
-        for(int i=0;i<fldmap.size();i++)
-            if(fldmap.at(i)->name() == name)
-                return fldmap.at(i);
-        return sqlb::FieldPtr();
-    }
-    sqlb::FieldVector fldmap;
+    sqlb::Table table;
 private:
     QString name;
     QString sql;
@@ -46,15 +37,16 @@ private:
     QString table_name;     // The name of the table this object references, interesting for views, triggers and indices
 };
 
-
-class DBBrowserDB
+class DBBrowserDB : public QObject
 {
+    Q_OBJECT
+
 public:
-    DBBrowserDB (): _db( 0 ), mainWindow(0) {}
-    ~DBBrowserDB (){}
+    explicit DBBrowserDB () : _db( 0 ) {}
+    virtual ~DBBrowserDB (){}
     bool open ( const QString & db);
     bool create ( const QString & db);
-    void close ();
+    bool close();
     bool setRestorePoint(const QString& pointname = "RESTOREPOINT");
     bool save (const QString& pointname = "RESTOREPOINT");
     bool revert (const QString& pointname = "RESTOREPOINT");
@@ -64,8 +56,33 @@ public:
     bool executeSQL ( const QString & statement, bool dirtyDB=true, bool logsql=true);
     bool executeMultiSQL(const QString& statement, bool dirty = true, bool log = false);
 
+    /**
+     * @brief getRow Executes a sqlite statement to get the rowdata(columns)
+     *        for the given rowid.
+     * @param sTableName Table to query.
+     * @param rowid The rowid to fetch.
+     * @param rowdata A list of QByteArray containing the row data.
+     * @return true if statement execution was ok, else false.
+     */
+    bool getRow(const QString& sTableName, int rowid, QList<QByteArray>& rowdata);
+
+    /**
+     * @brief max Queries the table t for the max value of field.
+     * @param t Table to query
+     * @param field Field to get the max value
+     * @return the max value of the field or 0 on error
+     */
+    int64_t max(const sqlb::Table& t, sqlb::FieldPtr field) const;
+
     void updateSchema();
     int addRecord(const QString& sTableName);
+
+    /**
+     * @brief Creates an empty insert statement.
+     * @param pk_value This optional parameter can be used to manually set a specific value for the primary key column
+     * @return An sqlite conform INSERT INTO statement with empty values. (NULL,'',0)
+     */
+    QString emptyInsertStmt(const sqlb::Table& t, int pk_value = -1) const;
     bool deleteRecord(const QString& table, int rowid);
     bool updateRecord(const QString& table, const QString& column, int row, const QByteArray& value);
 
@@ -83,11 +100,11 @@ public:
      */
     bool renameColumn(const QString& tablename, const QString& name, sqlb::FieldPtr to, int move = 0);
 
-    QStringList getTableFields(const QString & tablename) const;
     QStringList getBrowsableObjectNames() const;
     objectMap getBrowsableObjects() const;
     DBBrowserObject getObjectByName(const QString& name) const;
     bool isOpen() const;
+    bool encrypted() const { return isEncrypted; }
     bool getDirty() const;
     void logSQL(QString statement, int msgtype);
 
@@ -100,17 +117,19 @@ public:
 
     sqlite3 * _db;
 
-    QStringList decodeCSV(const QString & csvfilename, char sep, char quote,  int maxrecords, int * numfields);
-
     objectMap objMap;
 
     QString lastErrorMessage;
     QString curDBFilename;
 
-    MainWindow* mainWindow;
+signals:
+    void sqlExecuted(QString sql, int msgtype);
+    void dbChanged(bool dirty);
 
 private:
     QStringList savepointList;
+
+    bool isEncrypted;
 };
 
 #endif
